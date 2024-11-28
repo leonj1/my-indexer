@@ -1,0 +1,141 @@
+You are an expert in search engines and Golang development. 
+Build a Solr-like search engine in Go using test-driven development. 
+For each step, provide:
+1. The code implementation
+2. A comprehensive unit test
+3. Sample usage
+4. Explanation of the implementation
+
+Implementation Requirements:
+1. Use only standard Go libraries where possible
+2. Follow Go idioms and best practices
+3. Include proper error handling
+4. Add detailed comments
+5. Focus on clarity over premature optimization
+
+Performance Considerations:
+1. Memory usage
+2. Disk I/O patterns
+3. Concurrent access
+4. Resource management
+5. Bottleneck identification
+
+Additional Guidelines:
+- Each step should build upon the previous ones
+- Keep the code modular and extensible
+- Include error handling for edge cases
+- Provide clear documentation
+- Consider future optimization opportunities
+
+Before proceeding to the next step, ensure all unit tests pass and the code meets these criteria:
+- Clean, readable, and well-documented
+- Properly handles errors
+- Thread-safe where necessary
+- Memory efficient
+- Follows Go best practices
+
+Step 1: Document Structure
+- Create a Document struct that can hold different field types (string, int, float)
+- Include methods for adding and retrieving fields
+- Write unit tests to verify:
+  * Document creation
+  * Field addition
+  * Field retrieval
+  * Field type validation
+  * Error handling for invalid field types
+- The project should be dockerized.
+- Create a Makefile with build, test, stop, and run targets
+- Create a unit test for this step.
+- Run the unit test to validate this step has completed successfully.
+
+Step 2: Text Analysis
+- Implement a simple analyzer interface
+- Create a basic tokenizer that splits text on whitespace
+- Add token filters for lowercasing and removing punctuation
+- Write unit tests to verify:
+  * Text tokenization
+  * Token filtering
+  * Special character handling
+  * Multi-language text support
+  * Edge cases (empty string, only spaces)
+- Create a unit test for this step.
+- Run the unit test to validate this step has completed successfully.
+
+Step 3: Basic Inverted Index
+- Create an in-memory inverted index structure
+- Implement methods to add documents to the index
+- Add basic term frequency counting
+- Write unit tests to verify:
+  * Document indexing
+  * Term frequency calculation
+  * Document retrieval by term
+  * Index consistency after updates
+  * Memory usage patterns
+- Create a unit test for this step.
+- Run the unit test to validate this step has completed successfully.
+
+Step 4: File Persistence Layer
+- Design a simple file format for the index
+- Implement index serialization to disk
+- Add index loading from disk
+- Write unit tests to verify:
+  * Index saving
+  * Index loading
+  * Data integrity
+  * Corruption handling
+  * Concurrent access safety
+- Create a unit test for this step.
+- Run the unit test to validate this step has completed successfully.
+
+Step 5: Basic Search Implementation
+- Add boolean search capabilities (AND, OR)
+- Implement simple scoring based on term frequency
+- Create a basic results collector
+- Write unit tests to verify:
+  * Boolean query execution
+  * Result ranking
+  * Search performance
+  * Edge cases in queries
+  * Result accuracy
+- Create a unit test for this step.
+- Run the unit test to validate this step has completed successfully.
+
+Step 6: Index Management
+- Add document update capability
+- Implement document deletion
+- Create index optimization functionality
+- Write unit tests to verify:
+  * Document updates
+  * Deletion handling
+  * Index optimization
+  * Concurrent modifications
+  * Resource cleanup
+- Create a unit test for this step.
+- Run the unit test to validate this step has completed successfully.
+
+Step 7: Transaction Log
+- Implement a write-ahead log
+- Add crash recovery functionality
+- Create commit/rollback capabilities
+- Write unit tests to verify:
+  * Transaction logging
+  * Recovery process
+  * Commit/rollback functionality
+  * Crash recovery scenarios
+  * Log file management
+- Create a unit test for this step.
+- Run the unit test to validate this step has completed successfully.
+
+Step 8: Query Parser
+- Create a simple query parser for search syntax
+- Add field-specific search capabilities
+- Implement phrase queries
+- Write unit tests to verify:
+  * Query parsing
+  * Field queries
+  * Phrase matching
+  * Syntax error handling
+  * Query optimization
+- Create a unit test for this step.
+- Run the unit test to validate this step has completed successfully.
+
