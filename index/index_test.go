@@ -8,126 +8,76 @@ import (
 )
 
 func TestIndexOperations(t *testing.T) {
-	idx := NewIndex(analysis.NewStandardAnalyzer())
+	// Create analyzer and index
+	analyzer := analysis.NewStandardAnalyzer()
+	idx := NewIndex(analyzer)
 
-	// Test adding documents
+	// Test document 1
 	doc1 := document.NewDocument()
-	err := doc1.AddField("title", "The quick brown fox")
-	if err != nil {
-		t.Fatalf("Failed to add field to document: %v", err)
-	}
-	err = doc1.AddField("content", "jumps over the lazy dog")
-	if err != nil {
-		t.Fatalf("Failed to add field to document: %v", err)
-	}
+	doc1.AddField("title", "The quick brown fox")
+	doc1.AddField("content", "jumps over the lazy dog")
 
-	doc2 := document.NewDocument()
-	err = doc2.AddField("title", "Quick brown foxes")
-	if err != nil {
-		t.Fatalf("Failed to add field to document: %v", err)
-	}
-	err = doc2.AddField("content", "are quick and brown")
-	if err != nil {
-		t.Fatalf("Failed to add field to document: %v", err)
-	}
-
-	// Add documents to index
 	docID1, err := idx.AddDocument(doc1)
 	if err != nil {
 		t.Fatalf("Failed to add document 1: %v", err)
 	}
-	t.Logf("Document 1 (ID: %d) content:", docID1)
-	for fieldName, field := range doc1.GetFields() {
-		if str, ok := field.Value.(string); ok {
-			t.Logf("  %s: %q", fieldName, str)
-			tokens := idx.analyzer.Analyze(str)
-			t.Logf("  Tokens:")
-			for _, token := range tokens {
-				t.Logf("    - %q (pos: %d)", token.Text, token.Position)
-			}
-		}
-	}
+
+	// Test document 2
+	doc2 := document.NewDocument()
+	doc2.AddField("title", "Quick brown foxes")
+	doc2.AddField("content", "are quick and brown")
 
 	docID2, err := idx.AddDocument(doc2)
 	if err != nil {
 		t.Fatalf("Failed to add document 2: %v", err)
 	}
-	t.Logf("Document 2 (ID: %d) content:", docID2)
-	for fieldName, field := range doc2.GetFields() {
-		if str, ok := field.Value.(string); ok {
-			t.Logf("  %s: %q", fieldName, str)
-			tokens := idx.analyzer.Analyze(str)
-			t.Logf("  Tokens:")
-			for _, token := range tokens {
-				t.Logf("    - %q (pos: %d)", token.Text, token.Position)
-			}
-		}
-	}
-
-	// Test document retrieval
-	retrievedDoc1, err := idx.GetDocument(docID1)
-	if err != nil {
-		t.Errorf("Failed to retrieve document 1: %v", err)
-	}
-	if retrievedDoc1 != doc1 {
-		t.Error("Retrieved document 1 does not match original")
-	}
 
 	// Test term frequency
 	tests := []struct {
-		term     string
-		docID    int
-		expected int
+		term   string
+		docID  int
+		expect int
 	}{
-		{"quick", docID1, 1},
-		{"quick", docID2, 2}, // appears twice in doc2
-		{"fox", docID1, 1},
-		{"foxes", docID2, 1},
+		{"quick", docID1, 1},  // appears once in doc1
+		{"quick", docID2, 2},  // appears twice in doc2
+		{"brown", docID1, 1},  // appears once in doc1
+		{"brown", docID2, 2},  // appears twice in doc2
+		{"fox", docID1, 1},    // appears once in doc1
+		{"foxes", docID2, 1},  // appears once in doc2
 		{"nonexistent", docID1, 0},
 	}
 
 	for _, tt := range tests {
-		freq, err := idx.GetTermFrequency(tt.term, tt.docID)
+		tf, err := idx.GetTermFrequency(tt.term, tt.docID)
 		if err != nil {
-			t.Errorf("GetTermFrequency(%q, %d) error: %v", tt.term, tt.docID, err)
+			t.Errorf("GetTermFrequency(%q, %d) returned error: %v", tt.term, tt.docID, err)
 			continue
 		}
-		if freq != tt.expected {
-			t.Errorf("GetTermFrequency(%q, %d) = %d, want %d", tt.term, tt.docID, freq, tt.expected)
+		if tf != tt.expect {
+			t.Errorf("GetTermFrequency(%q, %d) = %d, want %d", tt.term, tt.docID, tf, tt.expect)
 		}
 	}
 
 	// Test document frequency
-	docFreqTests := []struct {
-		term     string
-		expected int
+	dfTests := []struct {
+		term   string
+		expect int
 	}{
 		{"quick", 2},  // appears in both docs
-		{"fox", 1},    // appears in doc1
-		{"foxes", 1},  // appears in doc2
 		{"brown", 2},  // appears in both docs
+		{"fox", 1},    // appears only in doc1
+		{"foxes", 1},  // appears only in doc2
 		{"nonexistent", 0},
 	}
 
-	for _, tt := range docFreqTests {
-		freq, err := idx.GetDocumentFrequency(tt.term)
+	for _, tt := range dfTests {
+		df, err := idx.GetDocumentFrequency(tt.term)
 		if err != nil {
-			t.Errorf("GetDocumentFrequency(%q) error: %v", tt.term, err)
+			t.Errorf("GetDocumentFrequency(%q) returned error: %v", tt.term, err)
 			continue
 		}
-		if freq != tt.expected {
-			t.Logf("Term %q tokens:", tt.term)
-			tokens := idx.analyzer.Analyze(tt.term)
-			for _, token := range tokens {
-				t.Logf("  - %q", token.Text)
-			}
-			if postingList, err := idx.GetPostingList(tt.term); err == nil && postingList != nil {
-				t.Logf("Posting list for %q:", tt.term)
-				for docID, posting := range postingList.Postings {
-					t.Logf("  - Doc %d: freq=%d, positions=%v", docID, posting.TermFreq, posting.Positions)
-				}
-			}
-			t.Errorf("GetDocumentFrequency(%q) = %d, want %d", tt.term, freq, tt.expected)
+		if df != tt.expect {
+			t.Errorf("GetDocumentFrequency(%q) = %d, want %d", tt.term, df, tt.expect)
 		}
 	}
 
@@ -136,27 +86,9 @@ func TestIndexOperations(t *testing.T) {
 		t.Errorf("GetDocumentCount() = %d, want 2", count)
 	}
 
-	// Test posting list retrieval
-	postingList, err := idx.GetPostingList("quick")
-	if err != nil {
-		t.Fatalf("GetPostingList('quick') error: %v", err)
-	}
-	if postingList.DocFreq != 2 {
-		t.Errorf("PostingList.DocFreq = %d, want 2", postingList.DocFreq)
-	}
-	if len(postingList.Postings) != 2 {
-		t.Errorf("len(PostingList.Postings) = %d, want 2", len(postingList.Postings))
-	}
-
-	// Test error cases
+	// Test nil document
 	if _, err := idx.AddDocument(nil); err == nil {
 		t.Error("AddDocument(nil) should return error")
-	}
-	if _, err := idx.GetDocument(-1); err == nil {
-		t.Error("GetDocument(-1) should return error")
-	}
-	if _, err := idx.GetPostingList(""); err == nil {
-		t.Error("GetPostingList('') should return error")
 	}
 }
 

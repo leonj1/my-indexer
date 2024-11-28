@@ -20,6 +20,7 @@ type PostingEntry struct {
 	TermFreq      int       // Frequency of term in document
 	Positions     []int     // Positions of term in document
 	FieldName     string    // Name of the field containing the term
+	Fields        []string  // Names of the fields containing the term
 }
 
 // Index represents an inverted index
@@ -53,52 +54,56 @@ func (idx *Index) AddDocument(doc *document.Document) (int, error) {
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	// Assign document ID
 	docID := idx.nextDocID
 	idx.nextDocID++
+	idx.docCount++
+
+	// Store document in map
 	idx.docIDMap[docID] = doc
 
-	// Index each field
-	for fieldName, field := range doc.GetFields() {
-		if field.Type != document.StringType {
-			continue // Only index string fields for now
-		}
+	// Track total term frequencies across all fields
+	docTermFreqs := make(map[string]int)
 
-		// Convert field value to string and analyze
-		text, ok := field.Value.(string)
+	// First pass: collect term frequencies across all fields
+	for _, field := range doc.GetFields() {
+		// Skip non-string fields
+		fieldValue, ok := field.Value.(string)
 		if !ok {
 			continue
 		}
 
-		tokens := idx.analyzer.Analyze(text)
-		
-		// Index each token
+		// Analyze the text
+		tokens := idx.analyzer.Analyze(fieldValue)
+
+		// Count term frequencies
 		for _, token := range tokens {
-			postingList, exists := idx.terms[token.Text]
-			if !exists {
-				postingList = &PostingList{
-					Postings: make(map[int]*PostingEntry),
-				}
-				idx.terms[token.Text] = postingList
-			}
-
-			posting, exists := postingList.Postings[docID]
-			if !exists {
-				posting = &PostingEntry{
-					DocID:     docID,
-					FieldName: fieldName,
-					Positions: make([]int, 0),
-				}
-				postingList.Postings[docID] = posting
-				postingList.DocFreq++
-			}
-
-			posting.TermFreq++
-			posting.Positions = append(posting.Positions, token.Position)
+			docTermFreqs[token.Text]++
 		}
 	}
 
-	idx.docCount++
+	// Second pass: update posting lists with total frequencies
+	for term, totalFreq := range docTermFreqs {
+		postingList, exists := idx.terms[term]
+		if !exists {
+			postingList = &PostingList{
+				Postings: make(map[int]*PostingEntry),
+			}
+			idx.terms[term] = postingList
+		}
+
+		// Add or update posting entry
+		entry, exists := postingList.Postings[docID]
+		if !exists {
+			entry = &PostingEntry{
+				DocID:     docID,
+				Positions: make([]int, 0),
+			}
+			postingList.Postings[docID] = entry
+			postingList.DocFreq++
+		}
+		entry.TermFreq = totalFreq
+	}
+
 	return docID, nil
 }
 
@@ -139,35 +144,44 @@ func (idx *Index) GetPostingList(term string) (*PostingList, error) {
 	return postingList, nil
 }
 
-// GetTermFrequency returns the frequency of a term in a specific document
+// GetTermFrequency returns the frequency of a term in a document
 func (idx *Index) GetTermFrequency(term string, docID int) (int, error) {
-	postingList, err := idx.GetPostingList(term)
-	if err != nil {
-		return 0, err
-	}
-	if postingList == nil {
-		return 0, nil
-	}
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
 
-	posting, exists := postingList.Postings[docID]
-	if !exists {
-		return 0, nil
+	if postingList, exists := idx.terms[term]; exists {
+		if entry, exists := postingList.Postings[docID]; exists {
+			return entry.TermFreq, nil
+		}
 	}
-
-	return posting.TermFreq, nil
+	return 0, nil
 }
 
 // GetDocumentFrequency returns the number of documents containing a term
 func (idx *Index) GetDocumentFrequency(term string) (int, error) {
-	postingList, err := idx.GetPostingList(term)
-	if err != nil {
-		return 0, err
-	}
-	if postingList == nil {
-		return 0, nil
-	}
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
 
-	return postingList.DocFreq, nil
+	if postingList, exists := idx.terms[term]; exists {
+		return postingList.DocFreq, nil
+	}
+	return 0, nil
+}
+
+// GetPostings returns the posting list entries for a term
+func (idx *Index) GetPostings(term string) map[int]*PostingEntry {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	if postingList, exists := idx.terms[term]; exists {
+		// Create a copy to avoid concurrent access issues
+		entries := make(map[int]*PostingEntry, len(postingList.Postings))
+		for docID, entry := range postingList.Postings {
+			entries[docID] = entry
+		}
+		return entries
+	}
+	return make(map[int]*PostingEntry)
 }
 
 // GetDocumentCount returns the total number of documents in the index
@@ -175,4 +189,193 @@ func (idx *Index) GetDocumentCount() int {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.docCount
+}
+
+// GetTerms returns a copy of the terms map for serialization
+func (idx *Index) GetTerms() map[string]*PostingList {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	terms := make(map[string]*PostingList, len(idx.terms))
+	for term, postingList := range idx.terms {
+		terms[term] = postingList
+	}
+	return terms
+}
+
+// GetNextDocID returns the next document ID
+func (idx *Index) GetNextDocID() int {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.nextDocID
+}
+
+// RestoreFromData restores the index state from serialized data
+func (idx *Index) RestoreFromData(terms map[string]*PostingList, docCount, nextDocID int) error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	idx.terms = terms
+	idx.docCount = docCount
+	idx.nextDocID = nextDocID
+	return nil
+}
+
+// UpdateDocument updates an existing document in the index
+func (idx *Index) UpdateDocument(docID int, doc *document.Document) error {
+	if doc == nil {
+		return fmt.Errorf("cannot update with nil document")
+	}
+
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	// Check if document exists
+	oldDoc, exists := idx.docIDMap[docID]
+	if !exists {
+		return fmt.Errorf("document with ID %d does not exist", docID)
+	}
+
+	// Remove old document's terms from posting lists
+	for _, field := range oldDoc.GetFields() {
+		fieldValue, ok := field.Value.(string)
+		if !ok {
+			continue
+		}
+
+		tokens := idx.analyzer.Analyze(fieldValue)
+		for _, token := range tokens {
+			if postingList, exists := idx.terms[token.Text]; exists {
+				if _, exists := postingList.Postings[docID]; exists {
+					delete(postingList.Postings, docID)
+					postingList.DocFreq--
+					if postingList.DocFreq == 0 {
+						delete(idx.terms, token.Text)
+					}
+				}
+			}
+		}
+	}
+
+	// Index new document's terms
+	docTermFreqs := make(map[string]int)
+
+	// First pass: collect term frequencies
+	for _, field := range doc.GetFields() {
+		fieldValue, ok := field.Value.(string)
+		if !ok {
+			continue
+		}
+
+		tokens := idx.analyzer.Analyze(fieldValue)
+		for _, token := range tokens {
+			docTermFreqs[token.Text]++
+		}
+	}
+
+	// Second pass: update posting lists
+	for term, freq := range docTermFreqs {
+		postingList, exists := idx.terms[term]
+		if !exists {
+			postingList = &PostingList{
+				Postings: make(map[int]*PostingEntry),
+			}
+			idx.terms[term] = postingList
+		}
+
+		entry := &PostingEntry{
+			DocID:    docID,
+			TermFreq: freq,
+		}
+		postingList.Postings[docID] = entry
+		if _, exists := postingList.Postings[docID]; !exists {
+			postingList.DocFreq++
+		}
+	}
+
+	// Update document in map
+	idx.docIDMap[docID] = doc
+
+	return nil
+}
+
+// DeleteDocument removes a document from the index
+func (idx *Index) DeleteDocument(docID int) error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	// Check if document exists
+	doc, exists := idx.docIDMap[docID]
+	if !exists {
+		return fmt.Errorf("document with ID %d does not exist", docID)
+	}
+
+	// Remove document's terms from posting lists
+	for _, field := range doc.GetFields() {
+		fieldValue, ok := field.Value.(string)
+		if !ok {
+			continue
+		}
+
+		tokens := idx.analyzer.Analyze(fieldValue)
+		for _, token := range tokens {
+			if postingList, exists := idx.terms[token.Text]; exists {
+				if _, exists := postingList.Postings[docID]; exists {
+					delete(postingList.Postings, docID)
+					postingList.DocFreq--
+					if postingList.DocFreq == 0 {
+						delete(idx.terms, token.Text)
+					}
+				}
+			}
+		}
+	}
+
+	// Remove document from map and decrement count
+	delete(idx.docIDMap, docID)
+	idx.docCount--
+
+	return nil
+}
+
+// Optimize performs index optimization by removing gaps in document IDs
+// and cleaning up unused terms
+func (idx *Index) Optimize() error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	// Create new document ID mapping
+	newDocIDMap := make(map[int]*document.Document)
+	oldToNewID := make(map[int]int)
+	newID := 0
+
+	// Reassign document IDs sequentially
+	for oldID, doc := range idx.docIDMap {
+		newDocIDMap[newID] = doc
+		oldToNewID[oldID] = newID
+		newID++
+	}
+
+	// Update posting lists with new document IDs
+	newTerms := make(map[string]*PostingList)
+	for term, postingList := range idx.terms {
+		newPostings := make(map[int]*PostingEntry)
+		for oldID, entry := range postingList.Postings {
+			if newID, exists := oldToNewID[oldID]; exists {
+				entry.DocID = newID
+				newPostings[newID] = entry
+			}
+		}
+		if len(newPostings) > 0 {
+			postingList.Postings = newPostings
+			newTerms[term] = postingList
+		}
+	}
+
+	// Update index state
+	idx.docIDMap = newDocIDMap
+	idx.terms = newTerms
+	idx.nextDocID = len(newDocIDMap)
+
+	return nil
 }
