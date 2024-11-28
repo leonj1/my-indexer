@@ -67,6 +67,19 @@ func (d *Document) GetField(name string) (Field, error) {
 	return field, nil
 }
 
+// GetFields returns a map of all fields in the document
+func (d *Document) GetFields() map[string]Field {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	// Create a copy of the fields map to prevent concurrent modification
+	fields := make(map[string]Field, len(d.fields))
+	for k, v := range d.fields {
+		fields[k] = v
+	}
+	return fields
+}
+
 // determineFieldType infers the FieldType from a value
 func determineFieldType(value interface{}) (FieldType, error) {
 	switch value.(type) {
