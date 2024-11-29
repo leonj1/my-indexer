@@ -12,37 +12,59 @@ var (
 	infoLogger    *log.Logger
 	errorLogger   *log.Logger
 	requestLogger *log.Logger
+	
+	// File descriptors that need to be closed
+	infoFile    *os.File
+	errorFile   *os.File
+	requestFile *os.File
 )
 
-// Initialize sets up the loggers with the specified output files
+// Initialize sets up the loggers
 func Initialize() error {
 	// Create logs directory if it doesn't exist
 	if err := os.MkdirAll("logs", 0755); err != nil {
 		return fmt.Errorf("failed to create logs directory: %v", err)
 	}
 
-	// Open log files
-	infoFile, err := os.OpenFile("logs/info.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	var err error
+	infoFile, err = os.OpenFile("logs/info.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("failed to open info log file: %v", err)
 	}
 
-	errorFile, err := os.OpenFile("logs/error.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	errorFile, err = os.OpenFile("logs/error.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
+		Close() // Close any previously opened files
 		return fmt.Errorf("failed to open error log file: %v", err)
 	}
 
-	requestFile, err := os.OpenFile("logs/request.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	requestFile, err = os.OpenFile("logs/request.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
+		Close() // Close any previously opened files
 		return fmt.Errorf("failed to open request log file: %v", err)
 	}
 
-	// Initialize loggers with prefix and flags
 	infoLogger = log.New(infoFile, "INFO: ", log.Ldate|log.Ltime|log.Lshortfile)
 	errorLogger = log.New(errorFile, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
 	requestLogger = log.New(requestFile, "REQUEST: ", log.Ldate|log.Ltime)
 
 	return nil
+}
+
+// Close properly closes all log file descriptors
+func Close() {
+	if infoFile != nil {
+		infoFile.Close()
+		infoFile = nil
+	}
+	if errorFile != nil {
+		errorFile.Close()
+		errorFile = nil
+	}
+	if requestFile != nil {
+		requestFile.Close()
+		requestFile = nil
+	}
 }
 
 // Info logs an informational message

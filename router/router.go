@@ -27,6 +27,11 @@ func NewRouter() *Router {
 	return router
 }
 
+// Close performs cleanup of router resources
+func (r *Router) Close() {
+	logger.Close()
+}
+
 // ServeHTTP implements the http.Handler interface
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Wrap the response writer to capture status code

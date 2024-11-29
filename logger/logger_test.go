@@ -12,12 +12,14 @@ import (
 func TestInitialize(t *testing.T) {
 	// Clean up any existing log files
 	os.RemoveAll("logs")
+	defer os.RemoveAll("logs")
 
 	// Test initialization
 	err := Initialize()
 	if err != nil {
 		t.Fatalf("Failed to initialize loggers: %v", err)
 	}
+	defer Close()
 
 	// Check if log files were created
 	files := []string{"info.log", "error.log", "request.log"}
@@ -26,20 +28,19 @@ func TestInitialize(t *testing.T) {
 			t.Errorf("Log file %s was not created", file)
 		}
 	}
-
-	// Clean up
-	os.RemoveAll("logs")
 }
 
 func TestLogging(t *testing.T) {
 	// Clean up any existing log files
 	os.RemoveAll("logs")
+	defer os.RemoveAll("logs")
 
 	// Initialize loggers
 	err := Initialize()
 	if err != nil {
 		t.Fatalf("Failed to initialize loggers: %v", err)
 	}
+	defer Close()
 
 	// Test info logging
 	Info("Test info message")
@@ -60,20 +61,19 @@ func TestLogging(t *testing.T) {
 	if !strings.Contains(string(content), "Test error message") {
 		t.Error("Error message was not logged correctly")
 	}
-
-	// Clean up
-	os.RemoveAll("logs")
 }
 
 func TestLoggingMiddleware(t *testing.T) {
 	// Clean up any existing log files
 	os.RemoveAll("logs")
+	defer os.RemoveAll("logs")
 
 	// Initialize loggers
 	err := Initialize()
 	if err != nil {
 		t.Fatalf("Failed to initialize loggers: %v", err)
 	}
+	defer Close()
 
 	// Create a test handler
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -107,9 +107,6 @@ func TestLoggingMiddleware(t *testing.T) {
 	if !strings.Contains(logContent, "StatusCode=200") {
 		t.Error("Status code was not logged")
 	}
-
-	// Clean up
-	os.RemoveAll("logs")
 }
 
 func TestResponseWriter(t *testing.T) {
