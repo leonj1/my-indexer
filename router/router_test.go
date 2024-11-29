@@ -80,7 +80,10 @@ func TestBulkEndpoint(t *testing.T) {
 		{
 			name:           "Valid bulk request",
 			method:         http.MethodPost,
-			body:          `{"index": {"_index": "test", "_id": "1"}}`,
+			body:          `{"index": {"_index": "test", "_id": "1"}}
+{"field1": "value1", "field2": "value2"}
+{"index": {"_index": "test", "_id": "2"}}
+{"field1": "value3", "field2": "value4"}`,
 			expectedStatus: http.StatusOK,
 		},
 		{
@@ -99,7 +102,7 @@ func TestBulkEndpoint(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, "/_bulk", bytes.NewBufferString(tt.body))
+			req := httptest.NewRequest(tt.method, "/test/_bulk", bytes.NewBufferString(tt.body))
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 
