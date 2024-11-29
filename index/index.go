@@ -70,7 +70,13 @@ func (idx *Index) recover() error {
 		return fmt.Errorf("failed to recover from transaction log: %v", err)
 	}
 
-	// Replay committed operations
+	// Reset index state
+	idx.terms = make(map[string]*PostingList)
+	idx.docIDMap = make(map[int]*document.Document)
+	idx.docCount = 0
+	idx.nextDocID = 0
+
+	// Process entries in chronological order
 	for _, entry := range entries {
 		if !entry.Committed {
 			continue
@@ -78,22 +84,112 @@ func (idx *Index) recover() error {
 
 		switch entry.Operation {
 		case txlog.OpAdd:
-			_, err := idx.addDocumentInternal(entry.Document)
-			if err != nil {
-				return fmt.Errorf("failed to replay add operation: %v", err)
+			if entry.Document != nil {
+				// Create a new document and copy all fields
+				newDoc := document.NewDocument()
+				for _, field := range entry.Document.GetFields() {
+					newDoc.AddField(field.Name, field.Value)
+				}
+				
+				// Use the original document ID from the log entry
+				idx.docIDMap[entry.DocumentID] = newDoc
+				idx.docCount++
+				
+				// Index the document terms
+				docTermFreqs := make(map[string]int)
+				for _, field := range newDoc.GetFields() {
+					fieldValue, ok := field.Value.(string)
+					if !ok {
+						continue
+					}
+					
+					tokens := idx.analyzer.Analyze(fieldValue)
+					for _, token := range tokens {
+						docTermFreqs[token.Text]++
+					}
+				}
+				
+				// Update posting lists
+				for term, freq := range docTermFreqs {
+					postingList, exists := idx.terms[term]
+					if !exists {
+						postingList = &PostingList{
+							Postings: make(map[int]*PostingEntry),
+						}
+						idx.terms[term] = postingList
+					}
+					
+					postingEntry := &PostingEntry{
+						DocID:    entry.DocumentID,
+						TermFreq: freq,
+					}
+					postingList.Postings[entry.DocumentID] = postingEntry
+					postingList.DocFreq++
+				}
 			}
 		case txlog.OpUpdate:
-			err := idx.updateDocumentInternal(entry.DocumentID, entry.Document)
-			if err != nil {
-				return fmt.Errorf("failed to replay update operation: %v", err)
+			if entry.Document != nil {
+				// Create a new document and copy all fields
+				newDoc := document.NewDocument()
+				for name, field := range entry.Document.GetFields() {
+					if err := newDoc.AddField(name, field.Value); err != nil {
+						return fmt.Errorf("failed to restore field %s: %v", name, err)
+					}
+				}
+			
+				// Store document directly in map since we're recovering
+				idx.docIDMap[entry.DocumentID] = newDoc
+				
+				// Index the document terms
+				docTermFreqs := make(map[string]int)
+				for _, field := range newDoc.GetFields() {
+					fieldValue, ok := field.Value.(string)
+					if !ok {
+						continue
+					}
+					
+					tokens := idx.analyzer.Analyze(fieldValue)
+					for _, token := range tokens {
+						docTermFreqs[token.Text]++
+					}
+				}
+				
+				// Update posting lists
+				for term, freq := range docTermFreqs {
+					postingList, exists := idx.terms[term]
+					if !exists {
+						postingList = &PostingList{
+							Postings: make(map[int]*PostingEntry),
+						}
+						idx.terms[term] = postingList
+					}
+					
+					postingEntry := &PostingEntry{
+						DocID:    entry.DocumentID,
+						TermFreq: freq,
+					}
+					postingList.Postings[entry.DocumentID] = postingEntry
+					postingList.DocFreq++
+				}
 			}
 		case txlog.OpDelete:
-			err := idx.deleteDocumentInternal(entry.DocumentID)
-			if err != nil {
-				return fmt.Errorf("failed to replay delete operation: %v", err)
+			// Only attempt delete if document exists
+			if _, exists := idx.docIDMap[entry.DocumentID]; exists {
+				if err := idx.deleteDocumentInternal(entry.DocumentID); err != nil {
+					return fmt.Errorf("failed to replay delete operation: %v", err)
+				}
 			}
 		}
 	}
+
+	// Update nextDocID to be after the highest used ID
+	maxID := -1
+	for docID := range idx.docIDMap {
+		if docID > maxID {
+			maxID = docID
+		}
+	}
+	idx.nextDocID = maxID + 1
 
 	// Clear the log after successful recovery
 	return idx.txLog.Truncate()
