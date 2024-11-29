@@ -22,10 +22,10 @@ type SearchResponse struct {
 	Hits     SearchHits `json:"hits"`
 }
 
-// SearchHits contains search results
+// SearchHits contains search results and handles null max_score values
 type SearchHits struct {
 	Total    Total      `json:"total"`
-	MaxScore float64    `json:"max_score"`
+	MaxScore *float64   `json:"max_score,omitempty"`
 	Hits     []Document `json:"hits"`
 }
 
