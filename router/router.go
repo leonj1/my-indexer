@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"my-indexer/logger"
 )
 
 // Router handles both ElasticSearch-compatible and custom API endpoints
@@ -13,13 +15,27 @@ type Router struct {
 
 // NewRouter creates a new Router instance
 func NewRouter() *Router {
-	return &Router{
+	router := &Router{
 		mux: http.NewServeMux(),
 	}
+
+	// Initialize the logger
+	if err := logger.Initialize(); err != nil {
+		logger.Error("Failed to initialize logger: %v", err)
+	}
+
+	return router
 }
 
 // ServeHTTP implements the http.Handler interface
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// Wrap the response writer to capture status code
+	wrapped := logger.LoggingMiddleware(http.HandlerFunc(r.route))
+	wrapped.ServeHTTP(w, req)
+}
+
+// route handles the actual routing logic
+func (r *Router) route(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 
 	// Handle document operations (e.g., /test-index/_doc/1)
@@ -40,6 +56,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	logger.Error("Invalid path: %s", path)
 	http.Error(w, "Not found", http.StatusNotFound)
 }
 
@@ -56,6 +73,7 @@ func (r *Router) RegisterElasticSearchHandlers() {
 
 // errorResponse sends an error response in JSON format
 func errorResponse(w http.ResponseWriter, code int, message string) {
+	logger.Error("Error response: %s (code: %d)", message, code)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(map[string]string{"error": message})
@@ -63,6 +81,8 @@ func errorResponse(w http.ResponseWriter, code int, message string) {
 
 // Handler functions for ElasticSearch-compatible endpoints
 func (r *Router) handleDocument(w http.ResponseWriter, req *http.Request) {
+	logger.Info("Handling document request: %s %s", req.Method, req.URL.Path)
+
 	// Check method first
 	if req.Method != http.MethodPut && req.Method != http.MethodGet && req.Method != http.MethodDelete {
 		errorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -77,6 +97,7 @@ func (r *Router) handleDocument(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 	case http.MethodPut:
 		// TODO: Implement document creation/update
+		logger.Info("Creating/updating document: %s", req.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"result": "created",
@@ -84,6 +105,7 @@ func (r *Router) handleDocument(w http.ResponseWriter, req *http.Request) {
 		})
 	case http.MethodGet:
 		// TODO: Implement document retrieval
+		logger.Info("Retrieving document: %s", req.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"found": true,
@@ -91,6 +113,7 @@ func (r *Router) handleDocument(w http.ResponseWriter, req *http.Request) {
 		})
 	case http.MethodDelete:
 		// TODO: Implement document deletion
+		logger.Info("Deleting document: %s", req.URL.Path)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"result": "deleted",
@@ -100,6 +123,8 @@ func (r *Router) handleDocument(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleBulk(w http.ResponseWriter, req *http.Request) {
+	logger.Info("Handling bulk request: %s", req.URL.Path)
+
 	// Check method first
 	if req.Method != http.MethodPost {
 		errorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -112,6 +137,7 @@ func (r *Router) handleBulk(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// TODO: Implement bulk operations
+	logger.Info("Processing bulk request")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"took": 0,
@@ -121,6 +147,8 @@ func (r *Router) handleBulk(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
+	logger.Info("Handling search request: %s %s", req.Method, req.URL.Path)
+
 	// Check method first
 	if req.Method != http.MethodGet && req.Method != http.MethodPost {
 		errorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -133,6 +161,7 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// TODO: Implement search
+	logger.Info("Processing search request")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"took": 0,
