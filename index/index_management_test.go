@@ -1,10 +1,10 @@
 package index
 
-// import (
-// 	"my-indexer/document"
-// 	"sync"
-// 	"testing"
-// )
+import (
+	"my-indexer/document"
+	"sync"
+	"testing"
+)
 
 // func TestDocumentUpdate(t *testing.T) {
 // 	idx := NewIndex(nil)
@@ -103,25 +103,25 @@ package index
 // 	}
 // }
 
-// func TestConcurrentModifications(t *testing.T) {
-// 	idx := NewIndex(nil)
-// 	var wg sync.WaitGroup
-// 	numOps := 100
+func TestConcurrentModifications(t *testing.T) {
+	idx := NewIndex(nil)
+	var wg sync.WaitGroup
+	numOps := 100
 
-// 	// Concurrent additions
-// 	wg.Add(numOps)
-// 	for i := 0; i < numOps; i++ {
-// 		go func(i int) {
-// 			defer wg.Done()
-// 			doc := document.NewDocument()
-// 			doc.AddField("content", "test content")
-// 			idx.AddDocument(doc)
-// 		}(i)
-// 	}
-// 	wg.Wait()
+	// Concurrent additions
+	wg.Add(numOps)
+	for i := 0; i < numOps; i++ {
+		go func(i int) {
+			defer wg.Done()
+			doc := document.NewDocument()
+			doc.AddField("content", "test content")
+			idx.AddDocument(doc)
+		}(i)
+	}
+	wg.Wait()
 
-// 	// Verify document count
-// 	if count := idx.GetDocumentCount(); count != numOps {
-// 		t.Errorf("Expected %d documents, got %d", numOps, count)
-// 	}
-// }
+	// Verify document count
+	if count := idx.GetDocumentCount(); count != numOps {
+		t.Errorf("Expected %d documents, got %d", numOps, count)
+	}
+}
