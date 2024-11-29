@@ -206,9 +206,7 @@ func (idx *Index) updateDocumentInternal(docID int, doc *document.Document) erro
 		return fmt.Errorf("cannot update with nil document")
 	}
 
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-
+	// Note: Caller must hold write lock
 	oldDoc, exists := idx.docIDMap[docID]
 	if !exists {
 		return fmt.Errorf("document with ID %d does not exist", docID)
