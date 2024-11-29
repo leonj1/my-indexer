@@ -136,6 +136,8 @@ func (t *TransactionLog) Recover() ([]*LogEntry, error) {
 	}
 
 	var entries []*LogEntry
+	t.uncommitted = make(map[int]*LogEntry) // Reset uncommitted map
+
 	for {
 		var entry LogEntry
 		if err := t.decoder.Decode(&entry); err != nil {
@@ -144,7 +146,16 @@ func (t *TransactionLog) Recover() ([]*LogEntry, error) {
 			}
 			return nil, fmt.Errorf("failed to decode log entry: %v", err)
 		}
+
 		entries = append(entries, &entry)
+		
+		// Track uncommitted entries in memory
+		if !entry.Committed {
+			t.uncommitted[entry.DocumentID] = &entry
+		} else {
+			// If we see a commit entry, remove the corresponding uncommitted entry
+			delete(t.uncommitted, entry.DocumentID)
+		}
 	}
 
 	return entries, nil

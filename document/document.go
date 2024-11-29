@@ -1,6 +1,7 @@
 package document
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 )
@@ -92,4 +93,60 @@ func determineFieldType(value interface{}) (FieldType, error) {
 	default:
 		return 0, fmt.Errorf("unsupported field type for value: %v", value)
 	}
+}
+
+// MarshalJSON implements json.Marshaler interface
+func (d *Document) MarshalJSON() ([]byte, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	// Create a map of field name to field value for JSON serialization
+	fields := make(map[string]interface{})
+	for name, field := range d.fields {
+		fields[name] = field.Value
+	}
+
+	return json.Marshal(fields)
+}
+
+// UnmarshalJSON implements json.Unmarshaler interface
+func (d *Document) UnmarshalJSON(data []byte) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// Initialize fields map if not already initialized
+	if d.fields == nil {
+		d.fields = make(map[string]Field)
+	}
+
+	// Unmarshal into a temporary map
+	var fields map[string]interface{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	// Convert each field into a Document Field
+	for name, value := range fields {
+		// Determine field type based on the value
+		var fieldType FieldType
+		switch value.(type) {
+		case string:
+			fieldType = StringType
+		case float64:
+			fieldType = FloatType
+		case int, int64:
+			fieldType = IntType
+		default:
+			return fmt.Errorf("unsupported field type for field %s", name)
+		}
+
+		// Add the field to the document
+		d.fields[name] = Field{
+			Name:  name,
+			Type:  fieldType,
+			Value: value,
+		}
+	}
+
+	return nil
 }

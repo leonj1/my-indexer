@@ -61,27 +61,34 @@ func (idx *Index) InitTransactionLog(logDir string) error {
 
 // recover processes any pending operations from the transaction log
 func (idx *Index) recover() error {
+	fmt.Printf("recover: Starting recovery process\n")
 	if idx.txLog == nil {
+		fmt.Printf("recover: No transaction log present, skipping recovery\n")
 		return nil
 	}
 
+	fmt.Printf("recover: Attempting to recover entries from transaction log\n")
 	entries, err := idx.txLog.Recover()
 	if err != nil {
 		return fmt.Errorf("failed to recover from transaction log: %v", err)
 	}
 
 	// Reset index state
+	fmt.Printf("recover: Resetting index state\n")
 	idx.terms = make(map[string]*PostingList)
 	idx.docIDMap = make(map[int]*document.Document)
 	idx.docCount = 0
 	idx.nextDocID = 0
 
+	fmt.Printf("recover: Processing %d entries in chronological order\n", len(entries))
 	// Process entries in chronological order
 	for _, entry := range entries {
 		if !entry.Committed {
 			continue
 		}
 
+		fmt.Printf("recover: Processing entry [Operation: %s, DocID: %d, Committed: %v]\n", 
+			entry.Operation, entry.DocumentID, entry.Committed)
 		switch entry.Operation {
 		case txlog.OpAdd:
 			if entry.Document != nil {
@@ -131,9 +138,9 @@ func (idx *Index) recover() error {
 			if entry.Document != nil {
 				// Create a new document and copy all fields
 				newDoc := document.NewDocument()
-				for name, field := range entry.Document.GetFields() {
-					if err := newDoc.AddField(name, field.Value); err != nil {
-						return fmt.Errorf("failed to restore field %s: %v", name, err)
+				for _, field := range entry.Document.GetFields() {
+					if err := newDoc.AddField(field.Name, field.Value); err != nil {
+						return fmt.Errorf("failed to restore field %s: %v", field.Name, err)
 					}
 				}
 			
@@ -190,7 +197,9 @@ func (idx *Index) recover() error {
 		}
 	}
 	idx.nextDocID = maxID + 1
+	fmt.Printf("recover: Set nextDocID to %d after scanning existing documents\n", idx.nextDocID)
 
+	fmt.Printf("recover: Recovery completed successfully, truncating log\n")
 	// Clear the log after successful recovery
 	return idx.txLog.Truncate()
 }

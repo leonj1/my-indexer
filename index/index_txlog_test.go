@@ -83,16 +83,16 @@ func TestTransactionLogIntegration(t *testing.T) {
 	}
 	t.Log("Successfully initialized new index instance")
 
-	// // Verify document state after recovery
-	// t.Log("Verifying document state after recovery")
-	// retrievedDoc, err = newIdx.GetDocument(docID)
-	// if err != nil {
-	// 	t.Fatalf("Failed to retrieve document after recovery: %v", err)
-	// }
-	// if title, _ := retrievedDoc.GetField("title"); title.Value != "updated document 1" {
-	// 	t.Fatalf("Expected title 'updated document 1' after recovery, got '%v'", title.Value)
-	// }
-	// t.Log("Successfully verified document state after recovery")
+	// Verify document state after recovery
+	t.Log("Verifying document state after recovery")
+	retrievedDoc, err = newIdx.GetDocument(docID)
+	if err != nil {
+		t.Fatalf("Failed to retrieve document after recovery: %v", err)
+	}
+	if title, _ := retrievedDoc.GetField("title"); title.Value != "updated document 1" {
+		t.Fatalf("Expected title 'updated document 1' after recovery, got '%v'", title.Value)
+	}
+	t.Log("Successfully verified document state after recovery")
 
 	// Test document deletion with transaction logging
 	t.Log("Testing document deletion")
