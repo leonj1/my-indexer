@@ -103,6 +103,9 @@ func TestBulkEndpoint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, "/test/_bulk", bytes.NewBufferString(tt.body))
+			if tt.method == http.MethodPost {
+				req.Header.Set("Content-Type", "application/x-ndjson")
+			}
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 

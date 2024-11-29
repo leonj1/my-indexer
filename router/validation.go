@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -92,52 +93,55 @@ func validateDocumentRequest(r *http.Request) error {
 
 // validateBulkRequest validates a bulk API request
 func validateBulkRequest(r *http.Request) error {
-	// Extract and validate index name from path
-	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) < 3 {
-		return ErrInvalidIndex
+	// Validate Content-Type for NDJSON format
+	if r.Header.Get("Content-Type") != "application/x-ndjson" {
+		return fmt.Errorf("invalid Content-Type, expected application/x-ndjson")
 	}
 
-	indexName := parts[1]
-	if indexName == "" {
-		return ErrInvalidIndex
-	}
+	// Limit request body size to 10MB
+	r.Body = http.MaxBytesReader(nil, r.Body, 10<<20)
+	defer r.Body.Close()
 
-	// Validate request body
-	body, err := validateRequestBody(r)
-	if err != nil {
-		return err
-	}
-
-	// For bulk requests, each line must be valid JSON
-	// Split by newlines, handling both \n and \r\n
-	lines := strings.Split(strings.ReplaceAll(string(body), "\r\n", "\n"), "\n")
-	
-	// Must have pairs of action + document lines
-	if len(lines) == 0 || len(lines)%2 != 0 {
-		return fmt.Errorf("bulk request must contain pairs of action and document lines")
-	}
-
-	for i, line := range lines {
+	// Read and validate each line as a separate JSON object
+	scanner := bufio.NewScanner(r.Body)
+	lineCount := 0
+	for scanner.Scan() {
+		line := scanner.Text()
 		if line == "" {
-			continue
-		}
-		if err := validateJSONBody([]byte(line)); err != nil {
-			return fmt.Errorf("invalid JSON at line %d: %v", i+1, err)
+			continue // Skip empty lines
 		}
 
-		// Validate action lines (even-numbered lines)
-		if i%2 == 0 {
-			var action map[string]interface{}
-			if err := json.Unmarshal([]byte(line), &action); err != nil {
-				return fmt.Errorf("invalid action at line %d: %v", i+1, err)
-			}
-			
-			// Check for valid action type
-			if _, ok := action["index"]; !ok {
-				return fmt.Errorf("line %d: only 'index' action is supported", i+1)
+		var action map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &action); err != nil {
+			return fmt.Errorf("invalid JSON at line %d: %v", lineCount+1, err)
+		}
+
+		// Validate action type
+		if len(action) != 1 {
+			return fmt.Errorf("invalid action at line %d: exactly one action type expected", lineCount+1)
+		}
+
+		// Check for valid action types
+		validAction := false
+		for _, actionType := range []string{"index", "create", "update", "delete"} {
+			if _, ok := action[actionType]; ok {
+				validAction = true
+				break
 			}
 		}
+		if !validAction {
+			return fmt.Errorf("invalid action type at line %d: must be one of index, create, update, or delete", lineCount+1)
+		}
+
+		lineCount++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading request body: %v", err)
+	}
+
+	if lineCount == 0 {
+		return fmt.Errorf("empty bulk request")
 	}
 
 	return nil

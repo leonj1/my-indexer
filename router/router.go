@@ -6,23 +6,26 @@ import (
 	"strings"
 
 	"my-indexer/logger"
+	"my-indexer/index"
+	"my-indexer/analysis"
 )
 
-// Router handles both ElasticSearch-compatible and custom API endpoints
+// Router handles HTTP requests for the indexer
 type Router struct {
-	mux *http.ServeMux
+	mux   *http.ServeMux
+	index *index.Index
 }
 
 // NewRouter creates a new Router instance
 func NewRouter() *Router {
+	analyzer := analysis.NewStandardAnalyzer()
 	router := &Router{
-		mux: http.NewServeMux(),
+		mux:   http.NewServeMux(),
+		index: index.NewIndex(analyzer),
 	}
 
 	// Initialize the logger
-	if err := logger.Initialize(); err != nil {
-		logger.Error("Failed to initialize logger: %v", err)
-	}
+	logger.Initialize()
 
 	return router
 }
@@ -34,35 +37,37 @@ func (r *Router) Close() {
 
 // ServeHTTP implements the http.Handler interface
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	// Wrap the response writer to capture status code
-	wrapped := logger.LoggingMiddleware(http.HandlerFunc(r.route))
-	wrapped.ServeHTTP(w, req)
+	// Log the request
+	logger.Info("Received request: %s %s", req.Method, req.URL.Path)
+
+	// Route the request
+	r.route(w, req)
 }
 
-// route handles the actual routing logic
+// route handles the routing logic
 func (r *Router) route(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path
 
-	// Handle document operations (e.g., /test-index/_doc/1)
-	if strings.Contains(path, "/_doc/") {
+	// Handle document operations
+	if strings.HasSuffix(req.URL.Path, "/_doc") || strings.Contains(req.URL.Path, "/_doc/") {
 		r.handleDocument(w, req)
 		return
 	}
 
-	// Handle bulk operations (e.g., /test-index/_bulk)
-	if strings.Contains(path, "/_bulk") {
+	// Handle bulk operations
+	if strings.HasSuffix(req.URL.Path, "/_bulk") {
 		r.handleBulk(w, req)
 		return
 	}
 
-	// Handle search operations (e.g., /test-index/_search)
+	// Handle search operations
 	if strings.Contains(path, "/_search") {
 		r.handleSearch(w, req)
 		return
 	}
 
-	logger.Error("Invalid path: %s", path)
-	http.Error(w, "Not found", http.StatusNotFound)
+	// Not found
+	http.NotFound(w, req)
 }
 
 // RegisterElasticSearchHandlers registers all ElasticSearch-compatible endpoints
@@ -125,30 +130,6 @@ func (r *Router) handleDocument(w http.ResponseWriter, req *http.Request) {
 			"status": http.StatusOK,
 		})
 	}
-}
-
-func (r *Router) handleBulk(w http.ResponseWriter, req *http.Request) {
-	logger.Info("Handling bulk request: %s", req.URL.Path)
-
-	// Check method first
-	if req.Method != http.MethodPost {
-		errorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-
-	if err := validateBulkRequest(req); err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	// TODO: Implement bulk operations
-	logger.Info("Processing bulk request")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"took": 0,
-		"errors": false,
-		"items": []interface{}{},
-	})
 }
 
 func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
