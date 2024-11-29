@@ -10,10 +10,15 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  push:
   pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
   pull_request_review_comment:
     types: [created]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 jobs:
   review:
