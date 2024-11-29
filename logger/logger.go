@@ -29,6 +29,7 @@ func Initialize() error {
 	var err error
 	infoFile, err = os.OpenFile("logs/info.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
+		Close() // Close any previously opened files
 		return fmt.Errorf("failed to open info log file: %v", err)
 	}
 
