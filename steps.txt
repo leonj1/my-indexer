@@ -1,141 +1,161 @@
-You are an expert in search engines and Golang development. 
-Build a Solr-like search engine in Go using test-driven development. 
-For each step, provide:
-1. The code implementation
-2. A comprehensive unit test
-3. Sample usage
-4. Explanation of the implementation
+Step 1: Analyze ElasticSearch API
 
-Implementation Requirements:
-1. Use only standard Go libraries where possible
-2. Follow Go idioms and best practices
-3. Include proper error handling
-4. Add detailed comments
-5. Focus on clarity over premature optimization
+	•	Task: ElasticSearch APIs to support:
+  • Endpoints: create document, update document, get document, delete document, search documents, 
+  * Bulk operations: batch indexing, batch updating, batch deleting.
+  * list indexes
+  * multi-search
+  * scroll api
+	•	Implementation:
+	1.	Read ElasticSearch documentation for detailed API contracts and expected behavior from elasticsearch_api_ref.md in this project.
+	2.	Define these APIs in your project as Go interfaces, aligning with the ElasticSearch standards.
+	•	Verification:
+	•	Write unit tests to validate API endpoint registration.
+	•	Mock an HTTP server to validate basic request/response flow.
 
-Performance Considerations:
-1. Memory usage
-2. Disk I/O patterns
-3. Concurrent access
-4. Resource management
-5. Bottleneck identification
+Step 2: Design an ElasticSearch-Compatible Router
 
-Additional Guidelines:
-- Each step should build upon the previous ones
-- Keep the code modular and extensible
-- Include error handling for edge cases
-- Provide clear documentation
-- Consider future optimization opportunities
+	•	Task: Create a routing layer to support both your existing APIs and ElasticSearch-compatible endpoints.
+	•	Implementation:
+	1.	Use Go’s http.ServeMux or a third-party router (if allowed).
+	2.	Define handlers for ElasticSearch-compatible endpoints.
+	3.	Ensure handlers validate requests according to ElasticSearch API.
 
-Before proceeding to the next step, ensure all unit tests pass and the code meets these criteria:
-- Clean, readable, and well-documented
-- Properly handles errors
-- Thread-safe where necessary
-- Memory efficient
-- Follows Go best practices
+func setupRouter() *http.ServeMux {
+    mux := http.NewServeMux()
+    // Existing APIs
+    mux.HandleFunc("/api/document", documentHandler)
+    // ElasticSearch APIs
+    mux.HandleFunc("/_search", elasticSearchHandler)
+    mux.HandleFunc("/_index", elasticIndexHandler)
+    return mux
+}
 
-Step 1: Document Structure
-- Create a Document struct that can hold different field types (string, int, float)
-- Include methods for adding and retrieving fields
-- Write unit tests to verify:
-  * Document creation
-  * Field addition
-  * Field retrieval
-  * Field type validation
-  * Error handling for invalid field types
-- The project should be dockerized.
-- Create a Makefile with build, test, stop, and run targets
-- Create a unit test for this step.
-- Run the unit test to validate this step has completed successfully.
+	•	Unit Test:
+	•	Mock HTTP requests for /api/document and ElasticSearch endpoints (/_search, /_index).
+	•	Assert correct routing and response codes.
+	•	Explanation: The router ensures seamless integration of new endpoints without affecting existing ones.
 
-Step 2: Text Analysis
-- Implement a simple analyzer interface
-- Create a basic tokenizer that splits text on whitespace
-- Add token filters for lowercasing and removing punctuation
-- Write unit tests to verify:
-  * Text tokenization
-  * Token filtering
-  * Special character handling
-  * Multi-language text support
-  * Edge cases (empty string, only spaces)
-- Create a unit test for this step.
-- Run the unit test to validate this step has completed successfully.
+  Step 3: Implement ElasticSearch-Compatible Indexing (/_index)
 
-Step 3: Basic Inverted Index
-- Create an in-memory inverted index structure
-- Implement methods to add documents to the index
-- Add basic term frequency counting
-- Write unit tests to verify:
-  * Document indexing
-  * Term frequency calculation
-  * Document retrieval by term
-  * Index consistency after updates
-  * Memory usage patterns
-- Create a unit test for this step.
-- Run the unit test to validate this step has completed successfully.
+	•	Task: Create a handler for the _index API to index documents in ElasticSearch’s JSON structure.
+	•	Implementation:
+	1.	Parse the ElasticSearch document format.
+	2.	Convert and add the document to your existing indexing system.
+	•	Code:
 
-Step 4: File Persistence Layer
-- Design a simple file format for the index
-- Implement index serialization to disk
-- Add index loading from disk
-- Write unit tests to verify:
-  * Index saving
-  * Index loading
-  * Data integrity
-  * Corruption handling
-  * Concurrent access safety
-- Create a unit test for this step.
-- Run the unit test to validate this step has completed successfully.
+func elasticIndexHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPut && r.Method != http.MethodPost {
+        http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
+        return
+    }
+    var doc map[string]interface{}
+    if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+        http.Error(w, "Invalid JSON", http.StatusBadRequest)
+        return
+    }
+    // Convert and index the document
+    if err := indexDocument(doc); err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    w.WriteHeader(http.StatusCreated)
+}
 
-Step 5: Basic Search Implementation
-- Add boolean search capabilities (AND, OR)
-- Implement simple scoring based on term frequency
-- Create a basic results collector
-- Write unit tests to verify:
-  * Boolean query execution
-  * Result ranking
-  * Search performance
-  * Edge cases in queries
-  * Result accuracy
-- Create a unit test for this step.
-- Run the unit test to validate this step has completed successfully.
+•	Unit Test:
+	•	Test valid and invalid requests (e.g., valid JSON, missing fields).
+	•	Assert document is correctly indexed into the system.
+	•	Explanation:
+This handler allows documents in ElasticSearch format to be ingested into your custom indexer.
 
-Step 6: Index Management
-- Add document update capability
-- Implement document deletion
-- Create index optimization functionality
-- Write unit tests to verify:
-  * Document updates
-  * Deletion handling
-  * Index optimization
-  * Concurrent modifications
-  * Resource cleanup
-- Create a unit test for this step.
-- Run the unit test to validate this step has completed successfully.
+Step 4: Implement ElasticSearch-Compatible Search (/_search)
 
-Step 7: Transaction Log
-- Implement a write-ahead log
-- Add crash recovery functionality
-- Create commit/rollback capabilities
-- Write unit tests to verify:
-  * Transaction logging
-  * Recovery process
-  * Commit/rollback functionality
-  * Crash recovery scenarios
-  * Log file management
-- Create a unit test for this step.
-- Run the unit test to validate this step has completed successfully.
+	•	Task: Create a handler to execute queries in ElasticSearch’s DSL format.
+	•	Implementation:
+	1.	Parse the DSL query.
+	2.	Map DSL components to your internal query structures.
+	3.	Execute the query and format results in ElasticSearch-compatible JSON.
+	•	Code:
 
-Step 8: Query Parser
-- Create a simple query parser for search syntax
-- Add field-specific search capabilities
-- Implement phrase queries
-- Write unit tests to verify:
-  * Query parsing
-  * Field queries
-  * Phrase matching
-  * Syntax error handling
-  * Query optimization
-- Create a unit test for this step.
-- Run the unit test to validate this step has completed successfully.
+  func elasticSearchHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
+        return
+    }
+    var query map[string]interface{}
+    if err := json.NewDecoder(r.Body).Decode(&query); err != nil {
+        http.Error(w, "Invalid JSON", http.StatusBadRequest)
+        return
+    }
+    results, err := executeQuery(query)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+    json.NewEncoder(w).Encode(results)
+}
+
+•	Unit Test:
+	•	Test query parsing, execution, and response formatting.
+	•	Verify compatibility with ElasticSearch query formats.
+	•	Explanation:
+This handler ensures search queries are executed according to ElasticSearch standards.
+
+Step 5: Add _bulk API Support
+
+	•	Task: Implement the _bulk API for batch operations (indexing, updating, deleting).
+	•	Implementation:
+	1.	Parse the bulk operation payload.
+	2.	Process each operation sequentially or concurrently.
+	•	Code:
+
+  func elasticBulkHandler(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
+        return
+    }
+    operations := parseBulkPayload(r.Body)
+    results := processBulkOperations(operations)
+    json.NewEncoder(w).Encode(results)
+}
+
+•	Unit Test:
+	•	Validate bulk payload parsing.
+	•	Assert batch operations (index, delete, update) work correctly.
+	•	Test edge cases (e.g., empty payload, invalid operation).
+	•	Explanation:
+This feature allows efficient batch processing, mirroring ElasticSearch behavior.
+
+Step 6: Extend Unit Tests for API Contracts
+
+	•	Task: Validate compatibility with ElasticSearch using comprehensive unit and integration tests.
+	•	Implementation:
+	•	Write tests to cover all API functionality and edge cases.
+	•	Mock ElasticSearch-compatible clients to simulate real-world usage.
+	•	Test concurrency, large payloads, and malformed requests.
+	•	Code:
+
+  func TestElasticSearchAPI(t *testing.T) {
+    // Test cases for each API (_index, _search, _bulk)
+    // Assert expected response formats and status codes
+}
+
+Step 7: Document API Extensions
+
+	•	Task: Update project documentation to include ElasticSearch-compatible APIs.
+	•	Implementation:
+	•	Provide examples for using the new APIs.
+	•	Document request/response formats and expected behavior.
+
+  Step 8: Dockerize and Validate
+
+	•	Task: Update the Docker setup to run the extended system.
+	•	Implementation:
+	•	Add scripts to the Makefile for starting the API server and running tests.
+
+  Additional Considerations:
+
+	•	Performance: Test throughput with concurrent requests to new APIs.
+	•	Error Handling: Ensure comprehensive validation and error responses.
+	•	Future Proofing: Use modular code to easily add more ElasticSearch features.
 
