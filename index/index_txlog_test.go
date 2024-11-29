@@ -133,56 +133,56 @@ func TestTransactionLogIntegration(t *testing.T) {
 	t.Log("Transaction log integration test completed successfully")
 }
 
-// func TestConcurrentTransactions(t *testing.T) {
-// 	tmpDir, err := os.MkdirTemp("", "index_txlog_test")
-// 	if err != nil {
-// 		t.Fatalf("Failed to create temp dir: %v", err)
-// 	}
-// 	defer os.RemoveAll(tmpDir)
+func TestConcurrentTransactions(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "index_txlog_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
 
-// 	idx := NewIndex(nil)
-// 	err = idx.InitTransactionLog(tmpDir)
-// 	if err != nil {
-// 		t.Fatalf("Failed to initialize transaction log: %v", err)
-// 	}
+	idx := NewIndex(nil)
+	err = idx.InitTransactionLog(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to initialize transaction log: %v", err)
+	}
 
-// 	// Test concurrent additions
-// 	done := make(chan bool)
-// 	for i := 0; i < 10; i++ {
-// 		go func(i int) {
-// 			doc := document.NewDocument()
-// 			doc.AddField("title", "concurrent document")
-// 			_, err := idx.AddDocument(doc)
-// 			if err != nil {
-// 				t.Errorf("Failed to add document concurrently: %v", err)
-// 			}
-// 			done <- true
-// 		}(i)
-// 	}
+	// Test concurrent additions
+	done := make(chan bool)
+	for i := 0; i < 10; i++ {
+		go func(i int) {
+			doc := document.NewDocument()
+			doc.AddField("title", "concurrent document")
+			_, err := idx.AddDocument(doc)
+			if err != nil {
+				t.Errorf("Failed to add document concurrently: %v", err)
+			}
+			done <- true
+		}(i)
+	}
 
-// 	// Wait for all operations to complete
-// 	for i := 0; i < 10; i++ {
-// 		<-done
-// 	}
+	// Wait for all operations to complete
+	for i := 0; i < 10; i++ {
+		<-done
+	}
 
-// 	// Verify document count
-// 	if count := idx.GetDocumentCount(); count != 10 {
-// 		t.Errorf("Expected 10 documents after concurrent additions, got %d", count)
-// 	}
+	// Verify document count
+	if count := idx.GetDocumentCount(); count != 10 {
+		t.Errorf("Expected 10 documents after concurrent additions, got %d", count)
+	}
 
-// 	// Close and recover
-// 	idx.Close()
+	// Close and recover
+	idx.Close()
 
-// 	// Create new index instance
-// 	newIdx := NewIndex(nil)
-// 	err = newIdx.InitTransactionLog(tmpDir)
-// 	if err != nil {
-// 		t.Fatalf("Failed to initialize transaction log for recovery: %v", err)
-// 	}
-// 	defer newIdx.Close()
+	// Create new index instance
+	newIdx := NewIndex(nil)
+	err = newIdx.InitTransactionLog(tmpDir)
+	if err != nil {
+		t.Fatalf("Failed to initialize transaction log for recovery: %v", err)
+	}
+	defer newIdx.Close()
 
-// 	// Verify document count after recovery
-// 	if count := newIdx.GetDocumentCount(); count != 10 {
-// 		t.Errorf("Expected 10 documents after recovery, got %d", count)
-// 	}
-// }
+	// Verify document count after recovery
+	if count := newIdx.GetDocumentCount(); count != 10 {
+		t.Errorf("Expected 10 documents after recovery, got %d", count)
+	}
+}
