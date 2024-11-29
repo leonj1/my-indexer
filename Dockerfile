@@ -15,4 +15,4 @@ COPY . .
 RUN go build -o main .
 
 # Run tests by default
-CMD ["go", "test", "./..."]
+CMD ["go", "test", "-v", "./..."]

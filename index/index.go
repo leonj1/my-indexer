@@ -6,6 +6,7 @@ import (
 
 	"my-indexer/analysis"
 	"my-indexer/document"
+	"my-indexer/txlog"
 )
 
 // PostingList represents a list of documents containing a term
@@ -31,6 +32,7 @@ type Index struct {
 	analyzer      analysis.Analyzer
 	nextDocID     int
 	docIDMap      map[int]*document.Document // Maps document IDs to documents
+	txLog         *txlog.TransactionLog      // Transaction log for crash recovery
 }
 
 // NewIndex creates a new inverted index
@@ -45,15 +47,65 @@ func NewIndex(analyzer analysis.Analyzer) *Index {
 	}
 }
 
-// AddDocument adds a document to the index
-func (idx *Index) AddDocument(doc *document.Document) (int, error) {
+// InitTransactionLog initializes the transaction log
+func (idx *Index) InitTransactionLog(logDir string) error {
+	txLog, err := txlog.NewTransactionLog(logDir)
+	if err != nil {
+		return fmt.Errorf("failed to create transaction log: %v", err)
+	}
+	idx.txLog = txLog
+
+	// Recover any pending operations
+	return idx.recover()
+}
+
+// recover processes any pending operations from the transaction log
+func (idx *Index) recover() error {
+	if idx.txLog == nil {
+		return nil
+	}
+
+	entries, err := idx.txLog.Recover()
+	if err != nil {
+		return fmt.Errorf("failed to recover from transaction log: %v", err)
+	}
+
+	// Replay committed operations
+	for _, entry := range entries {
+		if !entry.Committed {
+			continue
+		}
+
+		switch entry.Operation {
+		case txlog.OpAdd:
+			_, err := idx.addDocumentInternal(entry.Document)
+			if err != nil {
+				return fmt.Errorf("failed to replay add operation: %v", err)
+			}
+		case txlog.OpUpdate:
+			err := idx.updateDocumentInternal(entry.DocumentID, entry.Document)
+			if err != nil {
+				return fmt.Errorf("failed to replay update operation: %v", err)
+			}
+		case txlog.OpDelete:
+			err := idx.deleteDocumentInternal(entry.DocumentID)
+			if err != nil {
+				return fmt.Errorf("failed to replay delete operation: %v", err)
+			}
+		}
+	}
+
+	// Clear the log after successful recovery
+	return idx.txLog.Truncate()
+}
+
+// addDocumentInternal adds a document without transaction logging
+func (idx *Index) addDocumentInternal(doc *document.Document) (int, error) {
 	if doc == nil {
 		return 0, fmt.Errorf("cannot index nil document")
 	}
 
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-
+	// Note: Caller must hold write lock
 	docID := idx.nextDocID
 	idx.nextDocID++
 	idx.docCount++
@@ -66,23 +118,19 @@ func (idx *Index) AddDocument(doc *document.Document) (int, error) {
 
 	// First pass: collect term frequencies across all fields
 	for _, field := range doc.GetFields() {
-		// Skip non-string fields
 		fieldValue, ok := field.Value.(string)
 		if !ok {
 			continue
 		}
 
-		// Analyze the text
 		tokens := idx.analyzer.Analyze(fieldValue)
-
-		// Count term frequencies
 		for _, token := range tokens {
 			docTermFreqs[token.Text]++
 		}
 	}
 
-	// Second pass: update posting lists with total frequencies
-	for term, totalFreq := range docTermFreqs {
+	// Second pass: update posting lists
+	for term, freq := range docTermFreqs {
 		postingList, exists := idx.terms[term]
 		if !exists {
 			postingList = &PostingList{
@@ -91,26 +139,254 @@ func (idx *Index) AddDocument(doc *document.Document) (int, error) {
 			idx.terms[term] = postingList
 		}
 
-		// Add or update posting entry
-		entry, exists := postingList.Postings[docID]
-		if !exists {
-			entry = &PostingEntry{
-				DocID:     docID,
-				Positions: make([]int, 0),
-			}
-			postingList.Postings[docID] = entry
-			postingList.DocFreq++
+		entry := &PostingEntry{
+			DocID:    docID,
+			TermFreq: freq,
 		}
-		entry.TermFreq = totalFreq
+		postingList.Postings[docID] = entry
+		postingList.DocFreq++
 	}
 
 	return docID, nil
 }
 
+// AddDocument adds a document to the index with transaction logging
+func (idx *Index) AddDocument(doc *document.Document) (int, error) {
+	fmt.Printf("AddDocument: Starting...\n")
+	if doc == nil {
+		return 0, fmt.Errorf("cannot index nil document")
+	}
+
+	// Handle transaction logging first if enabled
+	if idx.txLog != nil {
+		fmt.Printf("AddDocument: Using transaction log\n")
+		docID := idx.nextDocID
+		if err := idx.txLog.LogOperation(txlog.OpAdd, docID, doc); err != nil {
+			return 0, fmt.Errorf("failed to log add operation: %v", err)
+		}
+
+		fmt.Printf("AddDocument: Attempting to acquire write lock\n")
+		idx.mu.Lock()
+		fmt.Printf("AddDocument: Write lock acquired\n")
+		defer func() {
+			idx.mu.Unlock()
+			fmt.Printf("AddDocument: Released write lock\n")
+		}()
+
+		// Add the document with transaction logging
+		id, err := idx.addDocumentInternal(doc)
+		if err != nil {
+			idx.txLog.Rollback(docID)
+			return 0, err
+		}
+
+		// Commit the operation
+		if err := idx.txLog.Commit(docID); err != nil {
+			return 0, fmt.Errorf("failed to commit add operation: %v", err)
+		}
+
+		return id, nil
+	}
+
+	// If no transaction log, add document directly
+	fmt.Printf("AddDocument: Attempting to acquire write lock\n")
+	idx.mu.Lock()
+	fmt.Printf("AddDocument: Write lock acquired\n")
+	defer func() {
+		idx.mu.Unlock()
+		fmt.Printf("AddDocument: Released write lock\n")
+	}()
+	
+	return idx.addDocumentInternal(doc)
+}
+
+// updateDocumentInternal updates a document without transaction logging
+func (idx *Index) updateDocumentInternal(docID int, doc *document.Document) error {
+	if doc == nil {
+		return fmt.Errorf("cannot update with nil document")
+	}
+
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	oldDoc, exists := idx.docIDMap[docID]
+	if !exists {
+		return fmt.Errorf("document with ID %d does not exist", docID)
+	}
+
+	// Remove old document's terms
+	for _, field := range oldDoc.GetFields() {
+		fieldValue, ok := field.Value.(string)
+		if !ok {
+			continue
+		}
+
+		tokens := idx.analyzer.Analyze(fieldValue)
+		for _, token := range tokens {
+			if postingList, exists := idx.terms[token.Text]; exists {
+				if _, exists := postingList.Postings[docID]; exists {
+					delete(postingList.Postings, docID)
+					postingList.DocFreq--
+					if postingList.DocFreq == 0 {
+						delete(idx.terms, token.Text)
+					}
+				}
+			}
+		}
+	}
+
+	// Add new document's terms
+	docTermFreqs := make(map[string]int)
+	for _, field := range doc.GetFields() {
+		fieldValue, ok := field.Value.(string)
+		if !ok {
+			continue
+		}
+
+		tokens := idx.analyzer.Analyze(fieldValue)
+		for _, token := range tokens {
+			docTermFreqs[token.Text]++
+		}
+	}
+
+	for term, freq := range docTermFreqs {
+		postingList, exists := idx.terms[term]
+		if !exists {
+			postingList = &PostingList{
+				Postings: make(map[int]*PostingEntry),
+			}
+			idx.terms[term] = postingList
+		}
+
+		entry := &PostingEntry{
+			DocID:    docID,
+			TermFreq: freq,
+		}
+		postingList.Postings[docID] = entry
+		if _, exists := postingList.Postings[docID]; !exists {
+			postingList.DocFreq++
+		}
+	}
+
+	idx.docIDMap[docID] = doc
+	return nil
+}
+
+// UpdateDocument updates a document with transaction logging
+func (idx *Index) UpdateDocument(docID int, doc *document.Document) error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	// Log the operation first
+	if idx.txLog != nil {
+		if err := idx.txLog.LogOperation(txlog.OpUpdate, docID, doc); err != nil {
+			return fmt.Errorf("failed to log update operation: %v", err)
+		}
+
+		// Update the document
+		if err := idx.updateDocumentInternal(docID, doc); err != nil {
+			idx.txLog.Rollback(docID)
+			return err
+		}
+
+		// Commit the operation
+		if err := idx.txLog.Commit(docID); err != nil {
+			return fmt.Errorf("failed to commit update operation: %v", err)
+		}
+
+		return nil
+	}
+
+	// If no transaction log, just update the document
+	return idx.updateDocumentInternal(docID, doc)
+}
+
+// deleteDocumentInternal deletes a document without transaction logging
+func (idx *Index) deleteDocumentInternal(docID int) error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	doc, exists := idx.docIDMap[docID]
+	if !exists {
+		return fmt.Errorf("document with ID %d does not exist", docID)
+	}
+
+	// Remove document's terms from posting lists
+	for _, field := range doc.GetFields() {
+		fieldValue, ok := field.Value.(string)
+		if !ok {
+			continue
+		}
+
+		tokens := idx.analyzer.Analyze(fieldValue)
+		for _, token := range tokens {
+			if postingList, exists := idx.terms[token.Text]; exists {
+				if _, exists := postingList.Postings[docID]; exists {
+					delete(postingList.Postings, docID)
+					postingList.DocFreq--
+					if postingList.DocFreq == 0 {
+						delete(idx.terms, token.Text)
+					}
+				}
+			}
+		}
+	}
+
+	delete(idx.docIDMap, docID)
+	idx.docCount--
+	return nil
+}
+
+// DeleteDocument deletes a document with transaction logging
+func (idx *Index) DeleteDocument(docID int) error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	// Log the operation first
+	if idx.txLog != nil {
+		if err := idx.txLog.LogOperation(txlog.OpDelete, docID, nil); err != nil {
+			return fmt.Errorf("failed to log delete operation: %v", err)
+		}
+
+		// Delete the document
+		if err := idx.deleteDocumentInternal(docID); err != nil {
+			idx.txLog.Rollback(docID)
+			return err
+		}
+
+		// Commit the operation
+		if err := idx.txLog.Commit(docID); err != nil {
+			return fmt.Errorf("failed to commit delete operation: %v", err)
+		}
+
+		return nil
+	}
+
+	// If no transaction log, just delete the document
+	return idx.deleteDocumentInternal(docID)
+}
+
+// Close closes the index and its transaction log
+func (idx *Index) Close() error {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+
+	if idx.txLog != nil {
+		if err := idx.txLog.Close(); err != nil {
+			return fmt.Errorf("failed to close transaction log: %v", err)
+		}
+	}
+	return nil
+}
+
 // GetDocument retrieves a document by its ID
 func (idx *Index) GetDocument(docID int) (*document.Document, error) {
+	fmt.Printf("GetDocument: Attempting to acquire read lock for docID %d\n", docID)
 	idx.mu.RLock()
-	defer idx.mu.RUnlock()
+	defer func() {
+		idx.mu.RUnlock()
+		fmt.Printf("GetDocument: Released read lock for docID %d\n", docID)
+	}()
 
 	doc, exists := idx.docIDMap[docID]
 	if !exists {
@@ -146,8 +422,12 @@ func (idx *Index) GetPostingList(term string) (*PostingList, error) {
 
 // GetTermFrequency returns the frequency of a term in a document
 func (idx *Index) GetTermFrequency(term string, docID int) (int, error) {
+	fmt.Printf("GetTermFrequency: Attempting to acquire read lock for term '%s' docID %d\n", term, docID)
 	idx.mu.RLock()
-	defer idx.mu.RUnlock()
+	defer func() {
+		idx.mu.RUnlock()
+		fmt.Printf("GetTermFrequency: Released read lock for term '%s' docID %d\n", term, docID)
+	}()
 
 	if postingList, exists := idx.terms[term]; exists {
 		if entry, exists := postingList.Postings[docID]; exists {
@@ -218,123 +498,6 @@ func (idx *Index) RestoreFromData(terms map[string]*PostingList, docCount, nextD
 	idx.terms = terms
 	idx.docCount = docCount
 	idx.nextDocID = nextDocID
-	return nil
-}
-
-// UpdateDocument updates an existing document in the index
-func (idx *Index) UpdateDocument(docID int, doc *document.Document) error {
-	if doc == nil {
-		return fmt.Errorf("cannot update with nil document")
-	}
-
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-
-	// Check if document exists
-	oldDoc, exists := idx.docIDMap[docID]
-	if !exists {
-		return fmt.Errorf("document with ID %d does not exist", docID)
-	}
-
-	// Remove old document's terms from posting lists
-	for _, field := range oldDoc.GetFields() {
-		fieldValue, ok := field.Value.(string)
-		if !ok {
-			continue
-		}
-
-		tokens := idx.analyzer.Analyze(fieldValue)
-		for _, token := range tokens {
-			if postingList, exists := idx.terms[token.Text]; exists {
-				if _, exists := postingList.Postings[docID]; exists {
-					delete(postingList.Postings, docID)
-					postingList.DocFreq--
-					if postingList.DocFreq == 0 {
-						delete(idx.terms, token.Text)
-					}
-				}
-			}
-		}
-	}
-
-	// Index new document's terms
-	docTermFreqs := make(map[string]int)
-
-	// First pass: collect term frequencies
-	for _, field := range doc.GetFields() {
-		fieldValue, ok := field.Value.(string)
-		if !ok {
-			continue
-		}
-
-		tokens := idx.analyzer.Analyze(fieldValue)
-		for _, token := range tokens {
-			docTermFreqs[token.Text]++
-		}
-	}
-
-	// Second pass: update posting lists
-	for term, freq := range docTermFreqs {
-		postingList, exists := idx.terms[term]
-		if !exists {
-			postingList = &PostingList{
-				Postings: make(map[int]*PostingEntry),
-			}
-			idx.terms[term] = postingList
-		}
-
-		entry := &PostingEntry{
-			DocID:    docID,
-			TermFreq: freq,
-		}
-		postingList.Postings[docID] = entry
-		if _, exists := postingList.Postings[docID]; !exists {
-			postingList.DocFreq++
-		}
-	}
-
-	// Update document in map
-	idx.docIDMap[docID] = doc
-
-	return nil
-}
-
-// DeleteDocument removes a document from the index
-func (idx *Index) DeleteDocument(docID int) error {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-
-	// Check if document exists
-	doc, exists := idx.docIDMap[docID]
-	if !exists {
-		return fmt.Errorf("document with ID %d does not exist", docID)
-	}
-
-	// Remove document's terms from posting lists
-	for _, field := range doc.GetFields() {
-		fieldValue, ok := field.Value.(string)
-		if !ok {
-			continue
-		}
-
-		tokens := idx.analyzer.Analyze(fieldValue)
-		for _, token := range tokens {
-			if postingList, exists := idx.terms[token.Text]; exists {
-				if _, exists := postingList.Postings[docID]; exists {
-					delete(postingList.Postings, docID)
-					postingList.DocFreq--
-					if postingList.DocFreq == 0 {
-						delete(idx.terms, token.Text)
-					}
-				}
-			}
-		}
-	}
-
-	// Remove document from map and decrement count
-	delete(idx.docIDMap, docID)
-	idx.docCount--
-
 	return nil
 }
 
