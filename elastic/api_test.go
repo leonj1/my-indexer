@@ -50,7 +50,7 @@ func (m *MockAPI) Search(ctx context.Context, query map[string]interface{}) (*Se
 	return &SearchResponse{
 		Took: 1,
 		Hits: SearchHits{
-			Total: Total{Value: int64(len(hits)), Relation: "eq"},
+			Total: Total{Value: int64(len(hits)), Relation: TotalRelationEq},
 			Hits:  hits,
 		},
 	}, nil
@@ -135,5 +135,42 @@ func TestElasticAPI(t *testing.T) {
 	}
 	if deleted != nil {
 		t.Error("Document still exists after deletion")
+	}
+}
+
+func TestTotalRelation(t *testing.T) {
+	tests := []struct {
+		name     string
+		relation TotalRelation
+		want     bool
+	}{
+		{
+			name:     "Valid eq relation",
+			relation: TotalRelationEq,
+			want:     true,
+		},
+		{
+			name:     "Valid gte relation",
+			relation: TotalRelationGte,
+			want:     true,
+		},
+		{
+			name:     "Invalid relation",
+			relation: TotalRelation("invalid"),
+			want:     false,
+		},
+		{
+			name:     "Empty relation",
+			relation: TotalRelation(""),
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.relation.IsValid(); got != tt.want {
+				t.Errorf("TotalRelation.IsValid() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

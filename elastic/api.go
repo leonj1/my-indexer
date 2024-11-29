@@ -29,10 +29,30 @@ type SearchHits struct {
 	Hits     []Document `json:"hits"`
 }
 
-// Total represents the total number of hits
+// TotalRelation represents the possible values for Total.Relation
+type TotalRelation string
+
+const (
+	// TotalRelationEq indicates the exact total count
+	TotalRelationEq TotalRelation = "eq"
+	// TotalRelationGte indicates the total count is greater than or equal
+	TotalRelationGte TotalRelation = "gte"
+)
+
+// Total represents the total number of hits with type-safe relation field
 type Total struct {
-	Value    int64  `json:"value"`
-	Relation string `json:"relation"`
+	Value    int64         `json:"value"`
+	Relation TotalRelation `json:"relation"`
+}
+
+// IsValid checks if the TotalRelation value is valid
+func (tr TotalRelation) IsValid() bool {
+	switch tr {
+	case TotalRelationEq, TotalRelationGte:
+		return true
+	default:
+		return false
+	}
 }
 
 // API defines the Elasticsearch-compatible API interface
