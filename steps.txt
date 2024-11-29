@@ -20,6 +20,7 @@ Step 2: Design an ElasticSearch-Compatible Router
 	1.	Use Go’s http.ServeMux or a third-party router (if allowed).
 	2.	Define handlers for ElasticSearch-compatible endpoints.
 	3.	Ensure handlers validate requests according to ElasticSearch API.
+  run 'make test' to validate changes
 
 func setupRouter() *http.ServeMux {
     mux := http.NewServeMux()
@@ -42,6 +43,7 @@ func setupRouter() *http.ServeMux {
 	•	Implementation:
 	1.	Parse the ElasticSearch document format.
 	2.	Convert and add the document to your existing indexing system.
+run 'make test' to validate changes
 	•	Code:
 
 func elasticIndexHandler(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +77,7 @@ Step 4: Implement ElasticSearch-Compatible Search (/_search)
 	1.	Parse the DSL query.
 	2.	Map DSL components to your internal query structures.
 	3.	Execute the query and format results in ElasticSearch-compatible JSON.
+run 'make test' to validate changes
 	•	Code:
 
   func elasticSearchHandler(w http.ResponseWriter, r *http.Request) {
@@ -107,6 +110,7 @@ Step 5: Add _bulk API Support
 	•	Implementation:
 	1.	Parse the bulk operation payload.
 	2.	Process each operation sequentially or concurrently.
+run 'make test' to validate changes
 	•	Code:
 
   func elasticBulkHandler(w http.ResponseWriter, r *http.Request) {
@@ -133,6 +137,7 @@ Step 6: Extend Unit Tests for API Contracts
 	•	Write tests to cover all API functionality and edge cases.
 	•	Mock ElasticSearch-compatible clients to simulate real-world usage.
 	•	Test concurrency, large payloads, and malformed requests.
+run 'make test' to validate changes
 	•	Code:
 
   func TestElasticSearchAPI(t *testing.T) {
@@ -146,12 +151,14 @@ Step 7: Document API Extensions
 	•	Implementation:
 	•	Provide examples for using the new APIs.
 	•	Document request/response formats and expected behavior.
+run 'make test' to validate changes
 
   Step 8: Dockerize and Validate
 
 	•	Task: Update the Docker setup to run the extended system.
 	•	Implementation:
 	•	Add scripts to the Makefile for starting the API server and running tests.
+run 'make test' to validate changes
 
   Additional Considerations:
 

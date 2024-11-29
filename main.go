@@ -1,6 +1,12 @@
 package main
 
+import (
+	"log"
+	"net/http"
+	"my-indexer/router"
+)
+
 func main() {
-	// Main entry point for the application
-	// This will be implemented in later steps
+	r := router.NewRouter()
+	log.Fatal(http.ListenAndServe(":8080", r))
 }
