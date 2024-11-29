@@ -158,13 +158,14 @@ func validateSearchRequest(r *http.Request) error {
 
 	// For POST requests, validate the request body
 	if r.Method == http.MethodPost {
-		body, err := validateRequestBody(r)
-		if err != nil {
-			return err
-		}
-
-		if err := validateJSONBody(body); err != nil {
-			return err
+		// Limit request body size to 10MB to prevent memory exhaustion
+		r.Body = http.MaxBytesReader(nil, r.Body, 10<<20)
+		var body map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			if err.Error() == "http: request body too large" {
+				return fmt.Errorf("request body exceeds 10MB limit")
+			}
+			return fmt.Errorf("invalid JSON: %v", err)
 		}
 	}
 
