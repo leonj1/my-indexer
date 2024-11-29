@@ -5,7 +5,12 @@ permissions:
   pull-requests: write
   issues: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
+  push:
   pull_request:
   pull_request_review_comment:
     types: [created]
