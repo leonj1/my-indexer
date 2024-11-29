@@ -78,30 +78,46 @@ import (
 // 	}
 // }
 
-// func TestIndexOptimization(t *testing.T) {
-// 	idx := NewIndex(nil)
+func TestIndexOptimization(t *testing.T) {
+	t.Log("Starting index optimization test")
+	idx := NewIndex(nil)
 
-// 	// Add and delete documents to create gaps
-// 	for i := 0; i < 10; i++ {
-// 		doc := document.NewDocument()
-// 		doc.AddField("content", "test content")
-// 		docID, _ := idx.AddDocument(doc)
-// 		if i%2 == 0 {
-// 			idx.DeleteDocument(docID)
-// 		}
-// 	}
+	// Add and delete documents to create gaps
+	t.Log("Adding and deleting documents to create gaps...")
+	for i := 0; i < 10; i++ {
+		doc := document.NewDocument()
+		doc.AddField("content", "test content")
+		docID, err := idx.AddDocument(doc)
+		if err != nil {
+			t.Fatalf("Failed to add document %d: %v", i, err)
+		}
+		t.Logf("Added document with ID: %d", docID)
+		
+		if i%2 == 0 {
+			if err := idx.DeleteDocument(docID); err != nil {
+				t.Fatalf("Failed to delete document %d: %v", docID, err)
+			}
+			t.Logf("Deleted document with ID: %d", docID)
+		}
+	}
 
-// 	// Optimize index
-// 	err := idx.Optimize()
-// 	if err != nil {
-// 		t.Fatalf("Failed to optimize index: %v", err)
-// 	}
+	t.Logf("Pre-optimization document count: %d", idx.GetDocumentCount())
 
-// 	// Verify optimization
-// 	if idx.GetDocumentCount() != 5 {
-// 		t.Errorf("Expected 5 documents after optimization, got %d", idx.GetDocumentCount())
-// 	}
-// }
+	// Optimize index
+	t.Log("Starting index optimization...")
+	err := idx.Optimize()
+	if err != nil {
+		t.Fatalf("Failed to optimize index: %v", err)
+	}
+	t.Log("Index optimization completed")
+
+	// Verify optimization
+	finalCount := idx.GetDocumentCount()
+	t.Logf("Post-optimization document count: %d", finalCount)
+	if finalCount != 5 {
+		t.Errorf("Expected 5 documents after optimization, got %d", finalCount)
+	}
+}
 
 func TestConcurrentModifications(t *testing.T) {
 	idx := NewIndex(nil)

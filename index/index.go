@@ -339,10 +339,7 @@ func (idx *Index) deleteDocumentInternal(docID int) error {
 
 // DeleteDocument deletes a document with transaction logging
 func (idx *Index) DeleteDocument(docID int) error {
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-
-	// Log the operation first
+	// Log the operation first if transaction logging is enabled
 	if idx.txLog != nil {
 		if err := idx.txLog.LogOperation(txlog.OpDelete, docID, nil); err != nil {
 			return fmt.Errorf("failed to log delete operation: %v", err)
