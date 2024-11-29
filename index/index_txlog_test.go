@@ -70,10 +70,10 @@ func TestTransactionLogIntegration(t *testing.T) {
 	}
 	t.Log("Successfully verified document update")
 
-	// // Test crash recovery
-	// t.Log("Testing crash recovery - closing index")
-	// idx.Close()
-	// t.Log("Index closed, creating new instance")
+	// Test crash recovery
+	t.Log("Testing crash recovery - closing index")
+	idx.Close()
+	t.Log("Index closed, creating new instance")
 
 	// Create new index instance
 	newIdx := NewIndex(nil)
