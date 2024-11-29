@@ -27,6 +27,9 @@ func NewRouter() *Router {
 	// Initialize the logger
 	logger.Initialize()
 
+	// Register handlers
+	router.RegisterElasticSearchHandlers()
+
 	return router
 }
 
@@ -40,29 +43,34 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Log the request
 	logger.Info("Received request: %s %s", req.Method, req.URL.Path)
 
-	// Route the request
-	r.route(w, req)
-}
-
-// route handles the routing logic
-func (r *Router) route(w http.ResponseWriter, req *http.Request) {
-	path := req.URL.Path
-
-	// Handle document operations
-	if strings.HasSuffix(req.URL.Path, "/_doc") || strings.Contains(req.URL.Path, "/_doc/") {
+	// Handle the request based on the path
+	if strings.Contains(req.URL.Path, "/_doc/") {
 		r.handleDocument(w, req)
 		return
 	}
 
-	// Handle bulk operations
 	if strings.HasSuffix(req.URL.Path, "/_bulk") {
 		r.handleBulk(w, req)
 		return
 	}
 
-	// Handle search operations
-	if strings.Contains(path, "/_search") {
+	if strings.Contains(req.URL.Path, "/_search") {
 		r.handleSearch(w, req)
+		return
+	}
+
+	if strings.HasSuffix(req.URL.Path, "/_msearch") {
+		r.handleMultiSearch(w, req)
+		return
+	}
+
+	if strings.HasSuffix(req.URL.Path, "/_cat/indices") {
+		r.handleListIndices(w, req)
+		return
+	}
+
+	if strings.HasSuffix(req.URL.Path, "/_scroll") {
+		r.handleScroll(w, req)
 		return
 	}
 
@@ -73,7 +81,7 @@ func (r *Router) route(w http.ResponseWriter, req *http.Request) {
 // RegisterElasticSearchHandlers registers all ElasticSearch-compatible endpoints
 func (r *Router) RegisterElasticSearchHandlers() {
 	// Document API endpoints
-	r.mux.HandleFunc("/_doc/", r.handleDocument)           // Single document operations
+	r.mux.HandleFunc("/", r.handleDocument)                // Single document operations (matches /index/_doc/id)
 	r.mux.HandleFunc("/_bulk", r.handleBulk)              // Bulk operations
 	r.mux.HandleFunc("/_search", r.handleSearch)          // Search
 	r.mux.HandleFunc("/_msearch", r.handleMultiSearch)    // Multi-search
@@ -99,33 +107,47 @@ func (r *Router) handleDocument(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Validate the request
 	if err := validateDocumentRequest(req); err != nil {
 		errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
+	// Extract index name and document ID from path
+	parts := strings.Split(req.URL.Path, "/")
+	indexName := parts[1]
+	docID := parts[3]
+
 	switch req.Method {
 	case http.MethodPut:
 		// TODO: Implement document creation/update
-		logger.Info("Creating/updating document: %s", req.URL.Path)
+		logger.Info("Creating/updating document: index=%s, id=%s", indexName, docID)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
+			"_index": indexName,
+			"_id":    docID,
 			"result": "created",
 			"status": http.StatusOK,
 		})
+
 	case http.MethodGet:
 		// TODO: Implement document retrieval
-		logger.Info("Retrieving document: %s", req.URL.Path)
+		logger.Info("Retrieving document: index=%s, id=%s", indexName, docID)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"found": true,
+			"_index": indexName,
+			"_id":    docID,
+			"found":  true,
 			"status": http.StatusOK,
 		})
+
 	case http.MethodDelete:
 		// TODO: Implement document deletion
-		logger.Info("Deleting document: %s", req.URL.Path)
+		logger.Info("Deleting document: index=%s, id=%s", indexName, docID)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
+			"_index": indexName,
+			"_id":    docID,
 			"result": "deleted",
 			"status": http.StatusOK,
 		})
@@ -137,26 +159,37 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 
 	// Check method first
 	if req.Method != http.MethodGet && req.Method != http.MethodPost {
-		errorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		errorResponse(w, http.StatusMethodNotAllowed, "only GET and POST methods are allowed")
 		return
 	}
 
+	// Extract index name from path
+	parts := strings.Split(req.URL.Path, "/")
+	if len(parts) < 3 {
+		errorResponse(w, http.StatusBadRequest, "invalid index name")
+		return
+	}
+	indexName := parts[1]
+
+	// Validate the request
 	if err := validateSearchRequest(req); err != nil {
 		errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// TODO: Implement search
-	logger.Info("Processing search request")
+	logger.Info("Processing search request for index: %s", indexName)
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"took": 0,
+		"took":      0,
+		"timed_out": false,
 		"hits": map[string]interface{}{
 			"total": map[string]interface{}{
-				"value": 0,
+				"value":    0,
 				"relation": "eq",
 			},
-			"hits": []interface{}{},
+			"max_score": nil,
+			"hits":      []interface{}{},
 		},
 	})
 }
