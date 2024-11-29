@@ -262,21 +262,23 @@ func (idx *Index) AddDocument(doc *document.Document) (int, error) {
 		return 0, fmt.Errorf("cannot index nil document")
 	}
 
-	// Handle transaction logging first if enabled
+	fmt.Printf("AddDocument: Attempting to acquire write lock\n")
+	idx.mu.Lock()
+	fmt.Printf("AddDocument: Write lock acquired\n")
+	defer func() {
+		idx.mu.Unlock()
+		fmt.Printf("AddDocument: Released write lock\n")
+	}()
+
+	// Get the next document ID under the lock
+	docID := idx.nextDocID
+
+	// Handle transaction logging if enabled
 	if idx.txLog != nil {
 		fmt.Printf("AddDocument: Using transaction log\n")
-		docID := idx.nextDocID
 		if err := idx.txLog.LogOperation(txlog.OpAdd, docID, doc); err != nil {
 			return 0, fmt.Errorf("failed to log add operation: %v", err)
 		}
-
-		fmt.Printf("AddDocument: Attempting to acquire write lock\n")
-		idx.mu.Lock()
-		fmt.Printf("AddDocument: Write lock acquired\n")
-		defer func() {
-			idx.mu.Unlock()
-			fmt.Printf("AddDocument: Released write lock\n")
-		}()
 
 		// Add the document with transaction logging
 		id, err := idx.addDocumentInternal(doc)
@@ -294,14 +296,6 @@ func (idx *Index) AddDocument(doc *document.Document) (int, error) {
 	}
 
 	// If no transaction log, add document directly
-	fmt.Printf("AddDocument: Attempting to acquire write lock\n")
-	idx.mu.Lock()
-	fmt.Printf("AddDocument: Write lock acquired\n")
-	defer func() {
-		idx.mu.Unlock()
-		fmt.Printf("AddDocument: Released write lock\n")
-	}()
-	
 	return idx.addDocumentInternal(doc)
 }
 
