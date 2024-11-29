@@ -71,6 +71,8 @@ func Close() {
 func Info(format string, v ...interface{}) {
 	if infoLogger != nil {
 		infoLogger.Printf(format, v...)
+	} else {
+		log.Printf("INFO: "+format, v...)
 	}
 }
 
@@ -78,6 +80,8 @@ func Info(format string, v ...interface{}) {
 func Error(format string, v ...interface{}) {
 	if errorLogger != nil {
 		errorLogger.Printf(format, v...)
+	} else {
+		log.Printf("ERROR: "+format, v...)
 	}
 }
 
