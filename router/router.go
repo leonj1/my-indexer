@@ -210,17 +210,19 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 	var err error
 
 	if req.Method == http.MethodGet {
-		// Parse query from URL parameters
+		// For GET requests without a query parameter, use match_all query
 		queryStr := req.URL.Query().Get("q")
 		if queryStr == "" {
-			http.Error(w, "Query parameter 'q' is required", http.StatusBadRequest)
-			return
-		}
-		// Create a match query for the q parameter
-		queryMapObj = map[string]interface{}{
-			"match": map[string]interface{}{
-				"_all": queryStr,
-			},
+			queryMapObj = map[string]interface{}{
+				"match_all": map[string]interface{}{},
+			}
+		} else {
+			// Create a match query for the q parameter
+			queryMapObj = map[string]interface{}{
+				"match": map[string]interface{}{
+					"_all": queryStr,
+				},
+			}
 		}
 	} else {
 		// Parse query from request body for POST

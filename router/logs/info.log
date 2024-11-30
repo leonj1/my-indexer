@@ -2601,3 +2601,33 @@ INFO: 2024/11/30 05:42:15 logger.go:74: Received request: POST /test-index/_sear
 INFO: 2024/11/30 05:42:15 logger.go:74: Received request: POST /test-index/_search
 INFO: 2024/11/30 05:42:15 logger.go:74: Received request: POST /test-index/_search
 INFO: 2024/11/30 05:42:15 logger.go:74: Received request: POST /test-index/_search
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: PUT /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Handling document request: PUT /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Creating/updating document: index=test-index, id=1
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: GET /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Handling document request: GET /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Retrieving document: index=test-index, id=1
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: DELETE /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Handling document request: DELETE /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Deleting document: index=test-index, id=1
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Handling document request: POST /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: PUT /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Handling document request: PUT /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test/_bulk
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: PUT /test/_bulk
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test/_bulk
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: PUT /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Handling document request: PUT /test-index/_doc/1
+INFO: 2024/11/30 05:43:19 logger.go:74: Creating/updating document: index=test-index, id=1
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: GET /test-index/_search
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test-index/_search
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: PUT /test-index/_search
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test-index/_search
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test-index/_search
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test-index/_search
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test-index/_search
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test-index/_search
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test-index/_search
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test-index/_search
+INFO: 2024/11/30 05:43:19 logger.go:74: Received request: POST /test-index/_search
