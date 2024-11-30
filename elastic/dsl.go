@@ -37,11 +37,22 @@ func (q BaseQuery) Type() QueryType {
 // MatchQueryClause represents a full text query
 type MatchQueryClause struct {
 	BaseQuery
-	Field string
-	Value interface{}
+	Field string      // Field to search in
+	Value interface{} // Value to search for (must be a string)
 }
 
 func (q *MatchQueryClause) MarshalJSON() ([]byte, error) {
+	// Validate that Value is a string
+	switch v := q.Value.(type) {
+	case string:
+		// Valid type, proceed with marshaling
+	case fmt.Stringer:
+		// Also accept types that implement String() string
+		q.Value = v.String()
+	default:
+		return nil, fmt.Errorf("match query value must be a string, got %T", q.Value)
+	}
+
 	return json.Marshal(map[string]interface{}{
 		"query": map[string]interface{}{
 			"match": map[string]interface{}{
