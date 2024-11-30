@@ -5,22 +5,15 @@ import (
 	"strings"
 )
 
-// QueryType represents the type of query
-type QueryType int
+// Use the QueryType from query.go
 
-const (
-	TermQuery QueryType = iota
-	PhraseQuery
-	FieldQuery
-)
-
-// Query represents a parsed search query
-type Query struct {
-	Type      QueryType
-	Field     string
-	Terms     []string
-	IsPhrase  bool
-	SubQueries []Query
+// ParsedQuery represents a parsed search query
+type ParsedQuery struct {
+	Type       QueryType
+	Field      string
+	Terms      []string
+	IsPhrase   bool
+	SubQueries []ParsedQuery
 	Operator   string // "AND" or "OR"
 }
 
@@ -36,8 +29,8 @@ func NewParser(defaultField string) *Parser {
 	}
 }
 
-// Parse parses a query string into a Query object
-func (p *Parser) Parse(queryStr string) (*Query, error) {
+// Parse parses a query string into a ParsedQuery object
+func (p *Parser) Parse(queryStr string) (*ParsedQuery, error) {
 	queryStr = strings.TrimSpace(queryStr)
 	if queryStr == "" {
 		return nil, fmt.Errorf("empty query")
@@ -63,7 +56,7 @@ func (p *Parser) Parse(queryStr string) (*Query, error) {
 			if len(terms) < 2 {
 				return nil, fmt.Errorf("phrase query must contain at least two terms")
 			}
-			return &Query{
+			return &ParsedQuery{
 				Type:     PhraseQuery,
 				Field:    field,
 				Terms:    terms,
@@ -76,7 +69,7 @@ func (p *Parser) Parse(queryStr string) (*Query, error) {
 			return nil, fmt.Errorf("empty field value")
 		}
 		
-		return &Query{
+		return &ParsedQuery{
 			Type:  FieldQuery,
 			Field: field,
 			Terms: terms,
@@ -90,7 +83,7 @@ func (p *Parser) Parse(queryStr string) (*Query, error) {
 		if len(terms) < 2 {
 			return nil, fmt.Errorf("phrase query must contain at least two terms")
 		}
-		return &Query{
+		return &ParsedQuery{
 			Type:     PhraseQuery,
 			Field:    p.defaultField,
 			Terms:    terms,
@@ -101,7 +94,7 @@ func (p *Parser) Parse(queryStr string) (*Query, error) {
 	// Handle AND/OR queries
 	if strings.Contains(queryStr, " AND ") {
 		parts := strings.Split(queryStr, " AND ")
-		subQueries := make([]Query, 0, len(parts))
+		subQueries := make([]ParsedQuery, 0, len(parts))
 		for _, part := range parts {
 			subQuery, err := p.Parse(part)
 			if err != nil {
@@ -109,7 +102,7 @@ func (p *Parser) Parse(queryStr string) (*Query, error) {
 			}
 			subQueries = append(subQueries, *subQuery)
 		}
-		return &Query{
+		return &ParsedQuery{
 			Type:       TermQuery,
 			SubQueries: subQueries,
 			Operator:   "AND",
@@ -118,7 +111,7 @@ func (p *Parser) Parse(queryStr string) (*Query, error) {
 
 	if strings.Contains(queryStr, " OR ") {
 		parts := strings.Split(queryStr, " OR ")
-		subQueries := make([]Query, 0, len(parts))
+		subQueries := make([]ParsedQuery, 0, len(parts))
 		for _, part := range parts {
 			subQuery, err := p.Parse(part)
 			if err != nil {
@@ -126,7 +119,7 @@ func (p *Parser) Parse(queryStr string) (*Query, error) {
 			}
 			subQueries = append(subQueries, *subQuery)
 		}
-		return &Query{
+		return &ParsedQuery{
 			Type:       TermQuery,
 			SubQueries: subQueries,
 			Operator:   "OR",
@@ -139,7 +132,7 @@ func (p *Parser) Parse(queryStr string) (*Query, error) {
 		return nil, fmt.Errorf("empty query")
 	}
 
-	return &Query{
+	return &ParsedQuery{
 		Type:  TermQuery,
 		Field: p.defaultField,
 		Terms: terms,
@@ -147,7 +140,7 @@ func (p *Parser) Parse(queryStr string) (*Query, error) {
 }
 
 // Validate checks if a query is valid
-func (p *Parser) Validate(query *Query) error {
+func (p *Parser) Validate(query *ParsedQuery) error {
 	if query == nil {
 		return fmt.Errorf("nil query")
 	}

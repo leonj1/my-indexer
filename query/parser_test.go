@@ -11,13 +11,13 @@ func TestQueryParser(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   string
-		want    *Query
+		want    *ParsedQuery
 		wantErr bool
 	}{
 		{
 			name:  "Simple term query",
 			input: "test",
-			want: &Query{
+			want: &ParsedQuery{
 				Type:  TermQuery,
 				Field: "content",
 				Terms: []string{"test"},
@@ -27,7 +27,7 @@ func TestQueryParser(t *testing.T) {
 		{
 			name:  "Field query",
 			input: "title:test",
-			want: &Query{
+			want: &ParsedQuery{
 				Type:  FieldQuery,
 				Field: "title",
 				Terms: []string{"test"},
@@ -37,7 +37,7 @@ func TestQueryParser(t *testing.T) {
 		{
 			name:  "Phrase query",
 			input: "\"quick brown fox\"",
-			want: &Query{
+			want: &ParsedQuery{
 				Type:     PhraseQuery,
 				Field:    "content",
 				Terms:    []string{"quick", "brown", "fox"},
@@ -48,7 +48,7 @@ func TestQueryParser(t *testing.T) {
 		{
 			name:  "Field phrase query",
 			input: "title:\"quick brown fox\"",
-			want: &Query{
+			want: &ParsedQuery{
 				Type:     PhraseQuery,
 				Field:    "title",
 				Terms:    []string{"quick", "brown", "fox"},
@@ -59,9 +59,9 @@ func TestQueryParser(t *testing.T) {
 		{
 			name:  "AND query",
 			input: "quick AND fox",
-			want: &Query{
+			want: &ParsedQuery{
 				Type: TermQuery,
-				SubQueries: []Query{
+				SubQueries: []ParsedQuery{
 					{
 						Type:  TermQuery,
 						Field: "content",
@@ -80,9 +80,9 @@ func TestQueryParser(t *testing.T) {
 		{
 			name:  "OR query",
 			input: "quick OR fox",
-			want: &Query{
+			want: &ParsedQuery{
 				Type: TermQuery,
-				SubQueries: []Query{
+				SubQueries: []ParsedQuery{
 					{
 						Type:  TermQuery,
 						Field: "content",
@@ -137,12 +137,12 @@ func TestQueryValidation(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		query   *Query
+		query   *ParsedQuery
 		wantErr bool
 	}{
 		{
 			name: "Valid term query",
-			query: &Query{
+			query: &ParsedQuery{
 				Type:  TermQuery,
 				Field: "content",
 				Terms: []string{"test"},
@@ -156,7 +156,7 @@ func TestQueryValidation(t *testing.T) {
 		},
 		{
 			name: "Empty query",
-			query: &Query{
+			query: &ParsedQuery{
 				Type:  TermQuery,
 				Field: "content",
 			},
@@ -164,7 +164,7 @@ func TestQueryValidation(t *testing.T) {
 		},
 		{
 			name: "Invalid phrase query",
-			query: &Query{
+			query: &ParsedQuery{
 				Type:     PhraseQuery,
 				Field:    "content",
 				Terms:    []string{"test"},
@@ -174,9 +174,9 @@ func TestQueryValidation(t *testing.T) {
 		},
 		{
 			name: "Valid AND query",
-			query: &Query{
+			query: &ParsedQuery{
 				Type: TermQuery,
-				SubQueries: []Query{
+				SubQueries: []ParsedQuery{
 					{
 						Type:  TermQuery,
 						Field: "content",
