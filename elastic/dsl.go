@@ -3,6 +3,7 @@ package elastic
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // QueryType represents the type of query
@@ -83,13 +84,55 @@ func (q *TermQueryClause) MarshalJSON() ([]byte, error) {
 type RangeQueryClause struct {
 	BaseQuery
 	Field string
-	GT    interface{} `json:"gt,omitempty"`
-	GTE   interface{} `json:"gte,omitempty"`
-	LT    interface{} `json:"lt,omitempty"`
-	LTE   interface{} `json:"lte,omitempty"`
+	GT    interface{} `json:"gt,omitempty"`   // Greater than value (must be numeric or time.Time)
+	GTE   interface{} `json:"gte,omitempty"`  // Greater than or equal value (must be numeric or time.Time)
+	LT    interface{} `json:"lt,omitempty"`   // Less than value (must be numeric or time.Time)
+	LTE   interface{} `json:"lte,omitempty"`  // Less than or equal value (must be numeric or time.Time)
+}
+
+// validateRangeValue checks if a value is valid for range queries (numeric or time.Time)
+func (q *RangeQueryClause) validateRangeValue(val interface{}) error {
+	if val == nil {
+		return nil
+	}
+
+	switch v := val.(type) {
+	case int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64:
+		return nil
+	case json.Number:
+		// Try to parse as float64 to validate it's a valid number
+		if _, err := v.Float64(); err != nil {
+			return fmt.Errorf("invalid numeric value: %v", err)
+		}
+		return nil
+	case string:
+		// Check if it's a valid time string
+		if _, err := time.Parse(time.RFC3339, v); err != nil {
+			return fmt.Errorf("string value must be a valid RFC3339 time format: %v", err)
+		}
+		return nil
+	case time.Time:
+		return nil
+	default:
+		return fmt.Errorf("range value must be numeric or time.Time, got %T", val)
+	}
 }
 
 func (q *RangeQueryClause) MarshalJSON() ([]byte, error) {
+	// Validate all range values
+	for name, val := range map[string]interface{}{
+		"gt":  q.GT,
+		"gte": q.GTE,
+		"lt":  q.LT,
+		"lte": q.LTE,
+	} {
+		if err := q.validateRangeValue(val); err != nil {
+			return nil, fmt.Errorf("invalid %s value: %v", name, err)
+		}
+	}
+
 	conditions := make(map[string]interface{})
 	if q.GT != nil {
 		conditions["gt"] = q.GT
