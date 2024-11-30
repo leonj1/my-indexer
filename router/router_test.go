@@ -154,6 +154,9 @@ func TestSearchEndpoint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, "/test-index/_search", strings.NewReader(tt.body))
+			if tt.method == http.MethodPost {
+				req.Header.Set("Content-Type", "application/json")
+			}
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, req)
 

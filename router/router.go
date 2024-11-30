@@ -2,6 +2,7 @@ package router
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -9,20 +10,37 @@ import (
 	"my-indexer/logger"
 	"my-indexer/index"
 	"my-indexer/analysis"
+	"my-indexer/document"
+	"my-indexer/search"
 )
+
+// IndexDocumentStore adapts Index to implement search.DocumentStore
+type IndexDocumentStore struct {
+	idx *index.Index
+}
+
+// LoadDocument implements search.DocumentStore
+func (s *IndexDocumentStore) LoadDocument(docID int) (*document.Document, error) {
+	return s.idx.GetDocument(docID)
+}
 
 // Router handles HTTP requests for the indexer
 type Router struct {
-	mux   *http.ServeMux
-	index *index.Index
+	mux    *http.ServeMux
+	index  *index.Index
+	search *search.Search
 }
 
 // NewRouter creates a new Router instance
 func NewRouter() *Router {
 	analyzer := analysis.NewStandardAnalyzer()
+	idx := index.NewIndex(analyzer)
+	store := &IndexDocumentStore{idx: idx}
+	
 	router := &Router{
-		mux:   http.NewServeMux(),
-		index: index.NewIndex(analyzer),
+		mux:    http.NewServeMux(),
+		index:  idx,
+		search: search.NewSearch(idx, store),
 	}
 
 	// Initialize the logger
@@ -177,9 +195,15 @@ func (r *Router) handleDocument(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 	logger.Info("Handling search request: %s %s", req.Method, req.URL.Path)
 
-	// Check method first
+	// Validate request method
 	if req.Method != http.MethodGet && req.Method != http.MethodPost {
 		r.errorResponse(w, http.StatusMethodNotAllowed, "only GET and POST methods are allowed")
+		return
+	}
+
+	// Validate the request
+	if err := validateSearchRequest(req); err != nil {
+		r.errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -191,34 +215,85 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 	}
 	indexName := parts[1]
 
-	// Validate the request
-	if err := validateSearchRequest(req); err != nil {
-		r.errorResponse(w, http.StatusBadRequest, err.Error())
+	// Start timing the search operation
+	startTime := time.Now()
+
+	// Default query for GET requests
+	var terms []string
+	if req.Method == http.MethodGet {
+		terms = []string{"*:*"} // Match all query
+	} else {
+		// Validate Content-Type for POST requests
+		contentType := req.Header.Get("Content-Type")
+		if contentType != "application/json" {
+			r.errorResponse(w, http.StatusBadRequest, "Content-Type must be application/json")
+			return
+		}
+
+		// Parse request body
+		var requestBody map[string]interface{}
+		if err := json.NewDecoder(req.Body).Decode(&requestBody); err != nil {
+			// If JSON parsing fails, default to match_all query
+			terms = append(terms, "*:*")
+		} else {
+			// For POST requests, parse the query
+			if queryRaw, ok := requestBody["query"]; ok {
+				// Handle match_all query
+				if queryMap, ok := queryRaw.(map[string]interface{}); ok {
+					if _, ok := queryMap["match_all"]; ok {
+						terms = append(terms, "*:*")
+					} else {
+						// Convert other query types to terms
+						for field, value := range queryMap {
+							if valueMap, ok := value.(map[string]interface{}); ok {
+								for k, v := range valueMap {
+									terms = append(terms, fmt.Sprintf("%s:%v", k, v))
+								}
+							} else {
+								terms = append(terms, fmt.Sprintf("%s:%v", field, value))
+							}
+						}
+					}
+				}
+			}
+
+			// If no terms were added, default to match_all
+			if len(terms) == 0 {
+				terms = append(terms, "*:*")
+			}
+		}
+	}
+
+	// Execute search
+	results, err := r.search.Search(terms, search.OR) // Use OR for better recall
+	if err != nil {
+		r.errorResponse(w, http.StatusInternalServerError, fmt.Sprintf("failed to execute search: %v", err))
 		return
 	}
 
-	// TODO: Implement search
-	logger.Info("Processing search request for index: %s", indexName)
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"took":      0,
-		"timed_out": false,
-		"hits": map[string]interface{}{
-			"total": map[string]interface{}{
-				"value":    0,
-				"relation": "eq",
-			},
-			"max_score": nil,
-			"hits":      []interface{}{},
-		},
-	})
+	// Format results
+	took := time.Since(startTime)
+	esResponse := search.FormatESResponse(results, took, indexName)
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(esResponse); err != nil {
+		logger.Error("Failed to encode response: %v", err)
+		r.errorResponse(w, http.StatusInternalServerError, "failed to encode response")
+		return
+	}
+}
+
+type validationError struct {
+	status  int
+	message string
+}
+
+func (e *validationError) Error() string {
+	return e.message
 }
 
 func (r *Router) handleMultiSearch(w http.ResponseWriter, req *http.Request) {
-	if err := validateSearchRequest(req); err != nil {
-		r.errorResponse(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	// TODO: Implement multi-search
 	http.Error(w, "Not implemented", http.StatusNotImplemented)
 }
@@ -233,10 +308,6 @@ func (r *Router) handleListIndices(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleScroll(w http.ResponseWriter, req *http.Request) {
-	if err := validateSearchRequest(req); err != nil {
-		r.errorResponse(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	// TODO: Implement scroll API
 	http.Error(w, "Not implemented", http.StatusNotImplemented)
 }
