@@ -736,3 +736,5 @@ ERROR: 2024/11/30 06:52:33 logger.go:83: Error response: method not allowed (cod
 ERROR: 2024/11/30 06:52:33 logger.go:83: Error response: invalid JSON in request body (code: 400)
 ERROR: 2024/11/30 06:52:44 logger.go:83: Error response: method not allowed (code: 405)
 ERROR: 2024/11/30 06:52:44 logger.go:83: Error response: invalid JSON in request body (code: 400)
+ERROR: 2024/11/30 12:11:04 logger.go:83: Error response: method not allowed (code: 405)
+ERROR: 2024/11/30 12:11:04 logger.go:83: Error response: invalid JSON in request body (code: 400)

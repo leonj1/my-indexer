@@ -88,10 +88,10 @@ func (q *TermQueryClause) MarshalJSON() ([]byte, error) {
 type RangeQueryClause struct {
 	BaseQuery
 	Field string
-	GT    interface{} `json:"gt,omitempty"`   // Greater than value (must be numeric or time.Time)
-	GTE   interface{} `json:"gte,omitempty"`  // Greater than or equal value (must be numeric or time.Time)
-	LT    interface{} `json:"lt,omitempty"`   // Less than value (must be numeric or time.Time)
-	LTE   interface{} `json:"lte,omitempty"`  // Less than or equal value (must be numeric or time.Time)
+	GT    interface{} `json:"gt,omitempty"`  // Greater than value (must be numeric or time.Time)
+	GTE   interface{} `json:"gte,omitempty"` // Greater than or equal value (must be numeric or time.Time)
+	LT    interface{} `json:"lt,omitempty"`  // Less than value (must be numeric or time.Time)
+	LTE   interface{} `json:"lte,omitempty"` // Less than or equal value (must be numeric or time.Time)
 }
 
 // validateRangeValue checks if a value is valid for range queries (numeric or time.Time)
@@ -236,13 +236,13 @@ func (q *BoolQueryClause) MarshalJSON() ([]byte, error) {
 const maxBoolNestingDepth = 2 // Maximum allowed nesting depth for bool queries
 
 type queryContext struct {
-	depth int
+	depth      int
 	seenFields map[string]map[string]bool // clause type -> field -> seen
 }
 
 func newQueryContext() *queryContext {
 	return &queryContext{
-		depth: 0,
+		depth:      0,
 		seenFields: make(map[string]map[string]bool),
 	}
 }
@@ -279,6 +279,16 @@ type PrefixQueryClause struct {
 }
 
 func (q *PrefixQueryClause) MarshalJSON() ([]byte, error) {
+	// Validate that Value is a string
+	switch v := q.Value.(type) {
+	case string:
+		// Valid type, proceed with marshaling
+	case fmt.Stringer:
+		// Also accept types that implement String() string
+		q.Value = v.String()
+	default:
+		return nil, fmt.Errorf("prefix query value must be a string, got %T", q.Value)
+	}
 	return json.Marshal(map[string]interface{}{
 		"prefix": map[string]interface{}{
 			q.Field: map[string]interface{}{
