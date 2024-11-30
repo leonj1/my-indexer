@@ -606,6 +606,22 @@ func parsePrefixQuery(data []byte, ctx *queryContext) (Query, error) {
 		}
 	}
 
+	if field == "" {
+		return nil, fmt.Errorf("field name cannot be empty")
+	}
+
+	// Validate the value
+	switch v := value.(type) {
+	case string:
+		if v == "" {
+			return nil, fmt.Errorf("prefix value cannot be empty")
+		}
+	case nil:
+		return nil, fmt.Errorf("prefix value cannot be null")
+	default:
+		return nil, fmt.Errorf("prefix value must be a string, got %T", value)
+	}
+
 	if err := ctx.checkAndAddField("prefix", field); err != nil {
 		return nil, err
 	}

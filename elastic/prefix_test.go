@@ -15,6 +15,41 @@ func TestPrefixQuery(t *testing.T) {
 		wantErr  bool
 	}{
 		{
+			name:    "empty prefix value",
+			input:   `{"query": {"prefix": {"title": ""}}}`,
+			wantErr: true,
+		},
+		{
+			name:    "invalid json syntax",
+			input:   `{"query": {"prefix": {"title": test}}}`,
+			wantErr: true,
+		},
+		{
+			name:    "missing required field",
+			input:   `{"query": {"prefix": {}}}`,
+			wantErr: true,
+		},
+		{
+			name:    "null value",
+			input:   `{"query": {"prefix": {"title": null}}}`,
+			wantErr: true,
+		},
+		{
+			name:    "numeric value",
+			input:   `{"query": {"prefix": {"title": 123}}}`,
+			wantErr: true,
+		},
+		{
+			name:    "boolean value",
+			input:   `{"query": {"prefix": {"title": true}}}`,
+			wantErr: true,
+		},
+		{
+			name:    "empty field name",
+			input:   `{"query": {"prefix": {"": "test"}}}`,
+			wantErr: true,
+		},
+		{
 			name:     "simple prefix query",
 			input:    `{"query": {"prefix": {"title": "test"}}}`,
 			expected: `{"prefix":{"title":{"value":"test"}}}`,
