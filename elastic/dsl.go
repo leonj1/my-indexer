@@ -20,6 +20,8 @@ const (
 	BoolQuery QueryType = "bool"
 	// MatchAll query that matches all documents
 	MatchAllQuery QueryType = "match_all"
+	// Prefix query for prefix matches
+	PrefixQuery QueryType = "prefix"
 )
 
 // Query represents the base query interface
@@ -86,10 +88,10 @@ func (q *TermQueryClause) MarshalJSON() ([]byte, error) {
 type RangeQueryClause struct {
 	BaseQuery
 	Field string
-	GT    interface{} `json:"gt,omitempty"`   // Greater than value (must be numeric or time.Time)
-	GTE   interface{} `json:"gte,omitempty"`  // Greater than or equal value (must be numeric or time.Time)
-	LT    interface{} `json:"lt,omitempty"`   // Less than value (must be numeric or time.Time)
-	LTE   interface{} `json:"lte,omitempty"`  // Less than or equal value (must be numeric or time.Time)
+	GT    interface{} `json:"gt,omitempty"`  // Greater than value (must be numeric or time.Time)
+	GTE   interface{} `json:"gte,omitempty"` // Greater than or equal value (must be numeric or time.Time)
+	LT    interface{} `json:"lt,omitempty"`  // Less than value (must be numeric or time.Time)
+	LTE   interface{} `json:"lte,omitempty"` // Less than or equal value (must be numeric or time.Time)
 }
 
 // validateRangeValue checks if a value is valid for range queries (numeric or time.Time)
@@ -234,13 +236,13 @@ func (q *BoolQueryClause) MarshalJSON() ([]byte, error) {
 const maxBoolNestingDepth = 2 // Maximum allowed nesting depth for bool queries
 
 type queryContext struct {
-	depth int
+	depth      int
 	seenFields map[string]map[string]bool // clause type -> field -> seen
 }
 
 func newQueryContext() *queryContext {
 	return &queryContext{
-		depth: 0,
+		depth:      0,
 		seenFields: make(map[string]map[string]bool),
 	}
 }
@@ -269,6 +271,33 @@ func (q *MatchAllQueryClause) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// PrefixQueryClause represents a prefix query
+type PrefixQueryClause struct {
+	BaseQuery
+	Field string
+	Value interface{}
+}
+
+func (q *PrefixQueryClause) MarshalJSON() ([]byte, error) {
+	// Validate that Value is a string
+	switch v := q.Value.(type) {
+	case string:
+		// Valid type, proceed with marshaling
+	case fmt.Stringer:
+		// Also accept types that implement String() string
+		q.Value = v.String()
+	default:
+		return nil, fmt.Errorf("prefix query value must be a string, got %T", q.Value)
+	}
+	return json.Marshal(map[string]interface{}{
+		"prefix": map[string]interface{}{
+			q.Field: map[string]interface{}{
+				"value": q.Value,
+			},
+		},
+	})
+}
+
 func ParseQuery(data []byte) (Query, error) {
 	var wrapper struct {
 		Query json.RawMessage `json:"query"`
@@ -291,14 +320,6 @@ func parseQueryClause(data []byte, ctx *queryContext) (Query, error) {
 		return nil, fmt.Errorf("failed to parse query clause: %v", err)
 	}
 
-	// Check bool nesting depth
-	if _, ok := raw["bool"]; ok {
-		ctx.depth++
-		if ctx.depth > maxBoolNestingDepth {
-			return nil, fmt.Errorf("bool query nesting depth exceeds maximum of %d", maxBoolNestingDepth)
-		}
-	}
-
 	// Check for query wrapper
 	if queryWrapper, ok := raw["query"]; ok {
 		queryBytes, err := json.Marshal(queryWrapper)
@@ -306,6 +327,11 @@ func parseQueryClause(data []byte, ctx *queryContext) (Query, error) {
 			return nil, fmt.Errorf("failed to marshal query wrapper: %v", err)
 		}
 		return parseQueryClause(queryBytes, ctx)
+	}
+
+	// Validate that we have exactly one query type
+	if len(raw) != 1 {
+		return nil, fmt.Errorf("query must have exactly one query type")
 	}
 
 	for queryType, value := range raw {
@@ -325,10 +351,14 @@ func parseQueryClause(data []byte, ctx *queryContext) (Query, error) {
 			return parseBoolQuery(raw, ctx)
 		case "match_all":
 			return parseMatchAllQuery(valueBytes, ctx)
+		case "prefix":
+			return parsePrefixQuery(valueBytes, ctx)
+		default:
+			return nil, fmt.Errorf("unsupported query type: %s", queryType)
 		}
 	}
 
-	return nil, fmt.Errorf("invalid or unsupported query type")
+	return nil, fmt.Errorf("invalid query structure")
 }
 
 func parseMatchQuery(data []byte, ctx *queryContext) (Query, error) {
@@ -468,6 +498,13 @@ func parseBoolQuery(data map[string]interface{}, ctx *queryContext) (Query, erro
 		return nil, fmt.Errorf("invalid bool query structure")
 	}
 
+	// Check bool nesting depth
+	ctx.depth++
+	if ctx.depth > maxBoolNestingDepth {
+		return nil, fmt.Errorf("bool query nesting depth exceeds maximum of %d", maxBoolNestingDepth)
+	}
+	defer func() { ctx.depth-- }()
+
 	// Validate bool query structure
 	for key := range boolClauses {
 		switch key {
@@ -476,9 +513,6 @@ func parseBoolQuery(data map[string]interface{}, ctx *queryContext) (Query, erro
 		default:
 			return nil, fmt.Errorf("invalid bool query clause: %s", key)
 		}
-	}
-	if !ok {
-		return nil, fmt.Errorf("invalid bool query structure")
 	}
 
 	// Process must clauses
@@ -542,6 +576,61 @@ func parseBoolQuery(data map[string]interface{}, ctx *queryContext) (Query, erro
 	}
 
 	return boolQuery, nil
+}
+
+func parsePrefixQuery(data []byte, ctx *queryContext) (Query, error) {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	if len(raw) != 1 {
+		return nil, fmt.Errorf("prefix query must have exactly one field")
+	}
+
+	var field string
+	var value interface{}
+
+	for f, v := range raw {
+		field = f
+		switch val := v.(type) {
+		case map[string]interface{}:
+			if v, ok := val["value"]; ok {
+				value = v
+			} else {
+				// If no value field is present, use the value directly
+				value = val
+			}
+		default:
+			value = val
+		}
+	}
+
+	if field == "" {
+		return nil, fmt.Errorf("field name cannot be empty")
+	}
+
+	// Validate the value
+	switch v := value.(type) {
+	case string:
+		if v == "" {
+			return nil, fmt.Errorf("prefix value cannot be empty")
+		}
+	case nil:
+		return nil, fmt.Errorf("prefix value cannot be null")
+	default:
+		return nil, fmt.Errorf("prefix value must be a string, got %T", value)
+	}
+
+	if err := ctx.checkAndAddField("prefix", field); err != nil {
+		return nil, err
+	}
+
+	return &PrefixQueryClause{
+		BaseQuery: BaseQuery{queryType: PrefixQuery},
+		Field:     field,
+		Value:     value,
+	}, nil
 }
 
 func parseMatchAllQuery(data []byte, ctx *queryContext) (Query, error) {
