@@ -4,13 +4,21 @@ setup(
     name="my-indexer-client",
     version="0.1.0",
     packages=find_packages(),
-    install_requires=[
-        "requests>=2.25.0",
-        "pydantic>=2.0.0",
-    ],
+    install_requires=[],  # No external dependencies needed when using as library
     python_requires=">=3.7",
     author="Your Name",
-    description="Python client for my-indexer",
+    description="Python client library for my-indexer - A full-text search and document indexing library",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
+    classifiers=[
+        "Development Status :: 3 - Alpha",
+        "Intended Audience :: Developers",
+        "License :: OSI Approved :: Apache Software License",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
+        "Topic :: Text Processing :: Indexing",
+    ],
 )

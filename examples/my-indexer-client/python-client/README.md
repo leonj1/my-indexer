@@ -13,9 +13,20 @@ A Python client library for using My Indexer as a library for full-text search a
 
 ## Installation
 
+### Development Installation
+Since this package is not yet published to PyPI, you'll need to install it directly from the source:
+
 ```bash
-pip install my-indexer-client
+# Clone the repository
+git clone https://github.com/yourusername/my-indexer.git
+cd my-indexer
+
+# Install the package in development mode
+pip install -e examples/my-indexer-client/python-client
 ```
+
+### Dependencies
+The client requires Python 3.7 or later.
 
 ## Quick Start
 
