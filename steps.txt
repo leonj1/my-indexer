@@ -71,38 +71,98 @@ func elasticIndexHandler(w http.ResponseWriter, r *http.Request) {
 This handler allows documents in ElasticSearch format to be ingested into your custom indexer.
 
 Step 4: Implement ElasticSearch-Compatible Search (/_search)
+Step 4.1: Parse the DSL Query
 
-	•	Task: Create a handler to execute queries in ElasticSearch’s DSL format.
-	•	Implementation:
-	1.	Parse the DSL query.
-	2.	Map DSL components to your internal query structures.
-	3.	Execute the query and format results in ElasticSearch-compatible JSON.
-run 'make test' to validate changes
-	•	Code:
+Task:
 
-  func elasticSearchHandler(w http.ResponseWriter, r *http.Request) {
+	•	Implement logic to parse ElasticSearch’s Query DSL (Domain-Specific Language) format into a Go struct.
+
+Implementation:
+
+	1.	Define a struct to represent supported query types (e.g., match, term, range, etc.).
+	2.	Parse incoming JSON into this struct.
+  This step ensures the handler can interpret queries in ElasticSearch DSL format.
+  Run 'make test' to validate changes
+
+
+Step 4.2: Map DSL Components to Internal Query Structures
+
+Task:
+
+	•	Translate parsed DSL queries into your internal query representation used by the indexer.
+
+Implementation:
+
+	1.	Define an internal query struct.
+	2.	Map supported DSL queries (match, term) to your query struct.
+
+
+
+Step 4.3: Execute the Internal Query
+
+Task:
+
+	•	Perform a search using your indexer’s query engine.
+
+Implementation:
+
+	1.	Use the internal query struct to retrieve results from the index.
+	2.	Return a result set compatible with ElasticSearch.
+	•	This step integrates with the indexer’s existing query engine to retrieve relevant documents.
+
+
+Step 4.4: Format Results in ElasticSearch-Compatible JSON
+
+Task:
+
+	•	Convert query results into a JSON format expected by ElasticSearch clients.
+
+Implementation:
+
+	1.	Define a struct for the response format.
+	2.	Populate the response with the query results.
+	•	This ensures clients receive results formatted as if from ElasticSearch.
+
+
+Step 4.5: Integrate Everything in the Handler
+
+Task:
+
+	•	Combine parsing, mapping, executing, and formatting in the /search endpoint.
+func elasticSearchHandler(w http.ResponseWriter, r *http.Request) {
     if r.Method != http.MethodPost {
         http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
         return
     }
-    var query map[string]interface{}
-    if err := json.NewDecoder(r.Body).Decode(&query); err != nil {
+    body, err := io.ReadAll(r.Body)
+    if err != nil {
+        http.Error(w, "Failed to read body", http.StatusBadRequest)
+        return
+    }
+    searchRequest, err := parseDSLQuery(body)
+    if err != nil {
         http.Error(w, "Invalid JSON", http.StatusBadRequest)
         return
     }
-    results, err := executeQuery(query)
+    internalQuery := mapToInternalQuery(searchRequest)
+    results, err := executeInternalQuery(internalQuery)
     if err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
+        http.Error(w, "Search execution failed", http.StatusInternalServerError)
         return
     }
-    json.NewEncoder(w).Encode(results)
+    response := formatElasticSearchResponse(results)
+    json.NewEncoder(w).Encode(response)
 }
 
-•	Unit Test:
-	•	Test query parsing, execution, and response formatting.
-	•	Verify compatibility with ElasticSearch query formats.
-	•	Explanation:
-This handler ensures search queries are executed according to ElasticSearch standards.
+Unit Test:
+
+	•	Mock a full /search request with JSON input and validate the response.
+
+
+
+
+
+==============
 
 Step 5: Add _bulk API Support
 
