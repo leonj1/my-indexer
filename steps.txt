@@ -220,7 +220,7 @@ run 'make test' to validate changes
 	•	Add scripts to the Makefile for starting the API server and running tests.
 run 'make test' to validate changes
 
-  Additional Considerations:
+Step 9:
 
 	•	Performance: Test throughput with concurrent requests to new APIs.
 	•	Error Handling: Ensure comprehensive validation and error responses.

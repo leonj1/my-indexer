@@ -291,14 +291,6 @@ func parseQueryClause(data []byte, ctx *queryContext) (Query, error) {
 		return nil, fmt.Errorf("failed to parse query clause: %v", err)
 	}
 
-	// Check bool nesting depth
-	if _, ok := raw["bool"]; ok {
-		ctx.depth++
-		if ctx.depth > maxBoolNestingDepth {
-			return nil, fmt.Errorf("bool query nesting depth exceeds maximum of %d", maxBoolNestingDepth)
-		}
-	}
-
 	// Check for query wrapper
 	if queryWrapper, ok := raw["query"]; ok {
 		queryBytes, err := json.Marshal(queryWrapper)
@@ -306,6 +298,11 @@ func parseQueryClause(data []byte, ctx *queryContext) (Query, error) {
 			return nil, fmt.Errorf("failed to marshal query wrapper: %v", err)
 		}
 		return parseQueryClause(queryBytes, ctx)
+	}
+
+	// Validate that we have exactly one query type
+	if len(raw) != 1 {
+		return nil, fmt.Errorf("query must have exactly one query type")
 	}
 
 	for queryType, value := range raw {
@@ -325,10 +322,12 @@ func parseQueryClause(data []byte, ctx *queryContext) (Query, error) {
 			return parseBoolQuery(raw, ctx)
 		case "match_all":
 			return parseMatchAllQuery(valueBytes, ctx)
+		default:
+			return nil, fmt.Errorf("unsupported query type: %s", queryType)
 		}
 	}
 
-	return nil, fmt.Errorf("invalid or unsupported query type")
+	return nil, fmt.Errorf("invalid query structure")
 }
 
 func parseMatchQuery(data []byte, ctx *queryContext) (Query, error) {
@@ -468,6 +467,13 @@ func parseBoolQuery(data map[string]interface{}, ctx *queryContext) (Query, erro
 		return nil, fmt.Errorf("invalid bool query structure")
 	}
 
+	// Check bool nesting depth
+	ctx.depth++
+	if ctx.depth > maxBoolNestingDepth {
+		return nil, fmt.Errorf("bool query nesting depth exceeds maximum of %d", maxBoolNestingDepth)
+	}
+	defer func() { ctx.depth-- }()
+
 	// Validate bool query structure
 	for key := range boolClauses {
 		switch key {
@@ -476,9 +482,6 @@ func parseBoolQuery(data map[string]interface{}, ctx *queryContext) (Query, erro
 		default:
 			return nil, fmt.Errorf("invalid bool query clause: %s", key)
 		}
-	}
-	if !ok {
-		return nil, fmt.Errorf("invalid bool query structure")
 	}
 
 	// Process must clauses
