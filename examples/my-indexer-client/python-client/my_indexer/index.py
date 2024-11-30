@@ -22,7 +22,7 @@ class Index:
         """
         self.analyzer = analyzer
         self.storage = storage or IndexStorage("index.gob")
-        self._documents = {}  # Placeholder for document storage
+        self._documents = self.storage.load_data()  # Load documents from storage
         
     def add_document(self, doc: Document) -> int:
         """
@@ -35,6 +35,7 @@ class Index:
             Document ID
         """
         doc_id = len(self._documents)
+        doc.id = doc_id  # Set document ID
         self._documents[doc_id] = doc
         return doc_id
         
@@ -79,5 +80,4 @@ class Index:
         
     def save(self):
         """Save the index to storage."""
-        # This is just a placeholder - the actual implementation is in Go
-        pass
+        self.storage.save_data(self._documents)

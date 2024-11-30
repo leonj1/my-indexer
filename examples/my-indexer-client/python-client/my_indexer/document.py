@@ -23,3 +23,12 @@ class Document:
         """String representation of the document."""
         fields_str = ", ".join(f"{k}: {v}" for k, v in self.fields.items())
         return f"Document(id={self.id}, fields={{{fields_str}}})"
+        
+    def __getstate__(self):
+        """Get state for pickling."""
+        return {'fields': self.fields, 'id': self.id}
+        
+    def __setstate__(self, state):
+        """Set state for unpickling."""
+        self.fields = state['fields']
+        self.id = state['id']
