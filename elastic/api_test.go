@@ -335,9 +335,23 @@ func TestElasticSearchCompatibility(t *testing.T) {
 			Source: map[string]interface{}{"data": largeData},
 		}
 
-		_, err := api.Index(ctx, doc)
+		indexed, err := api.Index(ctx, doc)
 		if err != nil {
 			t.Fatalf("Large document indexing failed: %v", err)
+		}
+
+		// Verify the indexed document has the correct ID
+		if indexed.ID != "large-1" {
+			t.Errorf("Expected document ID 'large-1', got '%s'", indexed.ID)
+		}
+
+		// Verify we can retrieve the large document
+		retrieved, err := api.Get(ctx, "large-test", "large-1")
+		if err != nil {
+			t.Fatalf("Failed to retrieve large document: %v", err)
+		}
+		if retrieved == nil {
+			t.Error("Large document not found after indexing")
 		}
 	})
 

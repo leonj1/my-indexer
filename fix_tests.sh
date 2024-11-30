@@ -8,12 +8,15 @@ exit_code=$?
 if [ $exit_code -ne 0 ]; then
   # Loop up to a maximum of 25 times
   for i in {1..25}; do
+    echo "Repomix..."
+    repomix
+
     echo "Attempt $i: Running aider to fix the error..."
 
     # Run the aider command with the specified options
     OUTPUT=$(go test ./...) # Capture the output from `go test ./...`
     aider --sonnet --dark-mode --no-cache-prompts --no-auto-commits \
-          --no-suggest-shell-commands --yes --yes-always \
+          --no-suggest-shell-commands --yes --yes-always --read repomix-output.txt\
           --message "Fix Error: $OUTPUT"
 
     # Re-run the tests after fixing

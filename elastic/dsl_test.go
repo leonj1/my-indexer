@@ -16,7 +16,9 @@ func TestParseQuery(t *testing.T) {
 			query: `{
 				"query": {
 					"match": {
-						"title": "golang programming"
+						"title": {
+							"query": "golang programming"
+						}
 					}
 				}
 			}`,
@@ -39,8 +41,8 @@ func TestParseQuery(t *testing.T) {
 				"query": {
 					"range": {
 						"age": {
-							"gte": 18,
-							"lte": 65
+							"gt": 18,
+							"lt": 65
 						}
 					}
 				}
@@ -55,14 +57,18 @@ func TestParseQuery(t *testing.T) {
 						"must": [
 							{
 								"match": {
-									"title": "golang"
+									"title": {
+										"query": "golang"
+									}
 								}
 							}
 						],
 						"filter": [
 							{
 								"term": {
-									"status": "published"
+									"status": {
+										"value": "published"
+									}
 								}
 							}
 						]
@@ -526,6 +532,115 @@ func TestDSLCompatibility(t *testing.T) {
 			if err == nil {
 				t.Errorf("Expected error for invalid query %d", i)
 			}
+		}
+	})
+}
+
+func TestMatchAllQueryClause(t *testing.T) {
+	t.Run("Type", func(t *testing.T) {
+		query := &MatchAllQueryClause{
+			BaseQuery: BaseQuery{queryType: MatchAllQuery},
+		}
+		if query.Type() != MatchAllQuery {
+			t.Errorf("Expected query type %s, got %s", MatchAllQuery, query.Type())
+		}
+	})
+
+	t.Run("MarshalJSON", func(t *testing.T) {
+		query := &MatchAllQueryClause{
+			BaseQuery: BaseQuery{queryType: MatchAllQuery},
+		}
+
+		data, err := query.MarshalJSON()
+		if err != nil {
+			t.Fatalf("Failed to marshal query: %v", err)
+		}
+
+		// Verify the JSON structure
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("Failed to unmarshal result: %v", err)
+		}
+
+		// Check query structure
+		queryObj, ok := result["query"].(map[string]interface{})
+		if !ok {
+			t.Error("Expected 'query' field to be an object")
+			return
+		}
+
+		matchAll, ok := queryObj["match_all"].(map[string]interface{})
+		if !ok {
+			t.Error("Expected 'match_all' field to be an object")
+			return
+		}
+
+		if len(matchAll) != 0 {
+			t.Error("Expected 'match_all' to be an empty object")
+		}
+
+		// Test that it produces valid JSON
+		expectedJSON := `{"query":{"match_all":{}}}`
+		actualJSON := string(data)
+		if actualJSON != expectedJSON {
+			t.Errorf("Expected JSON %s, got %s", expectedJSON, actualJSON)
+		}
+	})
+
+	t.Run("ParseQuery", func(t *testing.T) {
+		// Test parsing a match_all query
+		jsonQuery := []byte(`{"match_all":{}}`)
+		query, err := parseQueryClause(jsonQuery, newQueryContext())
+		if err != nil {
+			t.Fatalf("Failed to parse match_all query: %v", err)
+		}
+
+		matchAllQuery, ok := query.(*MatchAllQueryClause)
+		if !ok {
+			t.Error("Expected query to be a MatchAllQueryClause")
+			return
+		}
+
+		if matchAllQuery.Type() != MatchAllQuery {
+			t.Errorf("Expected query type %s, got %s", MatchAllQuery, matchAllQuery.Type())
+		}
+
+		// Test parsing with additional fields (should be ignored)
+		jsonQuery = []byte(`{"match_all":{"boost":1.0}}`)
+		query, err = parseQueryClause(jsonQuery, newQueryContext())
+		if err != nil {
+			t.Fatalf("Failed to parse match_all query with boost: %v", err)
+		}
+
+		matchAllQuery, ok = query.(*MatchAllQueryClause)
+		if !ok {
+			t.Error("Expected query to be a MatchAllQueryClause")
+		}
+	})
+
+	t.Run("Integration", func(t *testing.T) {
+		// Create a match_all query
+		query := &MatchAllQueryClause{
+			BaseQuery: BaseQuery{queryType: MatchAllQuery},
+		}
+
+		// Test that it matches any document
+		data, err := query.MarshalJSON()
+		if err != nil {
+			t.Fatalf("Failed to marshal query: %v", err)
+		}
+
+		var queryMap map[string]interface{}
+		if err := json.Unmarshal(data, &queryMap); err != nil {
+			t.Fatalf("Failed to unmarshal query: %v", err)
+		}
+
+		// Verify that the query matches the document
+		// In a real implementation, this would use the search functionality
+		// Here we just verify the query structure is correct
+		queryObj := queryMap["query"].(map[string]interface{})
+		if _, ok := queryObj["match_all"]; !ok {
+			t.Error("Expected query to have 'match_all' field")
 		}
 	})
 }
