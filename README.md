@@ -46,11 +46,18 @@ import (
     "fmt"
     "github.com/yourusername/my-indexer/index"
     "github.com/yourusername/my-indexer/elastic"
+    "github.com/yourusername/my-indexer/storage"
 )
 
 func main() {
-    // Create a new index
-    idx := index.NewIndex()
+    // Create a new storage with custom index filename
+    store, err := storage.NewIndexStorage("/some/path/folder", "index.gob")
+    if err != nil {
+        panic(err)
+    }
+
+    // Create a new index with the storage
+    idx := index.NewIndex(store)
 
     // Add a document
     doc := map[string]interface{}{
@@ -94,6 +101,18 @@ func main() {
         fmt.Printf("Found document: %v\n", result)
     }
 }
+```
+
+## Storage Configuration
+
+By default, My-Indexer uses `index.gob` as the index filename. You can customize this by providing a filename when creating the storage:
+
+```go
+// Use default filename (index.gob)
+store, err := storage.NewIndexStorage("/path/to/data", "")
+
+// Use custom filename
+store, err := storage.NewIndexStorage("/path/to/data", "custom_index.gob")
 ```
 
 ## Query Examples
