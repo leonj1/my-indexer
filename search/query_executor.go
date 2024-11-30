@@ -194,6 +194,11 @@ func (e *QueryExecutor) executeBooleanQuery(q query.Query) (*Results, error) {
 		}
 	}
 
+	// If both must and should clauses are empty, return empty results
+	if mustResults == nil && shouldResults == nil {
+		return &Results{hits: make([]*Result, 0)}, nil
+	}
+
 	// Combine results
 	return e.combineResults(mustResults, shouldResults), nil
 }
