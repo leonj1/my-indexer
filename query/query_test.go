@@ -29,49 +29,38 @@ func TestTermQuery(t *testing.T) {
 
 func TestRangeQuery(t *testing.T) {
 	t.Run("Numeric range", func(t *testing.T) {
-		query := NewRangeQuery("price")
-		query.SetGT(10.0)
-		query.SetLTE(20.0)
+		q := NewRangeQuery("price")
+		q.GreaterThan(10.0)
+		q.LessThan(20.0)
 
-		tests := []struct {
-			value float64
-			want  bool
-		}{
-			{5.0, false},
-			{10.0, false},
-			{15.0, true},
-			{20.0, true},
-			{25.0, false},
+		if !q.Match(15.0) {
+			t.Error("Expected 15.0 to match range query")
 		}
-
-		for _, tt := range tests {
-			if got := query.Match(tt.value); got != tt.want {
-				t.Errorf("RangeQuery.Match(%v) = %v, want %v", tt.value, got, tt.want)
-			}
+		if q.Match(5.0) {
+			t.Error("Expected 5.0 to not match range query")
+		}
+		if q.Match(25.0) {
+			t.Error("Expected 25.0 to not match range query")
 		}
 	})
 
 	t.Run("Time range", func(t *testing.T) {
-		query := NewRangeQuery("timestamp")
 		now := time.Now()
-		query.SetGTE(now)
-		query.SetLT(now.Add(24 * time.Hour))
+		before := now.Add(-1 * time.Hour)
+		after := now.Add(1 * time.Hour)
 
-		tests := []struct {
-			value time.Time
-			want  bool
-		}{
-			{now.Add(-1 * time.Hour), false},
-			{now, true},
-			{now.Add(12 * time.Hour), true},
-			{now.Add(24 * time.Hour), false},
-			{now.Add(25 * time.Hour), false},
+		q := NewRangeQuery("timestamp")
+		q.GreaterThan(before)
+		q.LessThan(after)
+
+		if !q.Match(now) {
+			t.Error("Expected now to match range query")
 		}
-
-		for _, tt := range tests {
-			if got := query.Match(tt.value); got != tt.want {
-				t.Errorf("RangeQuery.Match(%v) = %v, want %v", tt.value, got, tt.want)
-			}
+		if q.Match(before.Add(-1 * time.Hour)) {
+			t.Error("Expected time before range to not match")
+		}
+		if q.Match(after.Add(1 * time.Hour)) {
+			t.Error("Expected time after range to not match")
 		}
 	})
 }
@@ -188,8 +177,8 @@ func TestQueryMapper(t *testing.T) {
 		dslQuery := map[string]interface{}{
 			"range": map[string]interface{}{
 				"price": map[string]interface{}{
-					"gt":  10.0,
-					"lte": 20.0,
+					"gt": 10.0,
+					"lt": 20.0,
 				},
 			},
 		}

@@ -22,6 +22,12 @@ const (
 	RangeQuery
 	// BooleanQuery for combining multiple queries
 	BooleanQuery
+	// MatchQuery for analyzed text queries
+	MatchQuery
+	// MatchPhraseQuery for exact phrase matches
+	MatchPhraseQuery
+	// MatchAllQuery for matching all documents
+	MatchAllQuery
 )
 
 // Query represents the internal query interface
@@ -43,6 +49,7 @@ func NewTermQuery(field, term string) *TermQueryImpl {
 
 func (q *TermQueryImpl) Type() QueryType { return TermQuery }
 func (q *TermQueryImpl) Field() string   { return q.field }
+func (q *TermQueryImpl) Term() string    { return q.term }
 func (q *TermQueryImpl) Match(value interface{}) bool {
 	if str, ok := value.(string); ok {
 		return str == q.term
@@ -50,14 +57,11 @@ func (q *TermQueryImpl) Match(value interface{}) bool {
 	return false
 }
 
-// RangeQueryImpl represents a range comparison query
+// RangeQueryImpl implements a range query
 type RangeQueryImpl struct {
-	field    string
-	gt       interface{}
-	gte      interface{}
-	lt       interface{}
-	lte      interface{}
-	dataType string // "numeric" or "time"
+	field string
+	gt    interface{}
+	lt    interface{}
 }
 
 func NewRangeQuery(field string) *RangeQueryImpl {
@@ -66,21 +70,17 @@ func NewRangeQuery(field string) *RangeQueryImpl {
 
 func (q *RangeQueryImpl) Type() QueryType { return RangeQuery }
 func (q *RangeQueryImpl) Field() string   { return q.field }
+func (q *RangeQueryImpl) Gt() interface{} { return q.gt }
+func (q *RangeQueryImpl) Lt() interface{} { return q.lt }
 
-func (q *RangeQueryImpl) SetGT(val interface{})  { q.gt = val }
-func (q *RangeQueryImpl) SetGTE(val interface{}) { q.gte = val }
-func (q *RangeQueryImpl) SetLT(val interface{})  { q.lt = val }
-func (q *RangeQueryImpl) SetLTE(val interface{}) { q.lte = val }
+// GreaterThan sets the greater than value for the range query
+func (q *RangeQueryImpl) GreaterThan(val interface{}) {
+	q.gt = val
+}
 
-func (q *RangeQueryImpl) Match(value interface{}) bool {
-	switch v := value.(type) {
-	case float64:
-		return q.matchNumeric(v)
-	case time.Time:
-		return q.matchTime(v)
-	default:
-		return false
-	}
+// LessThan sets the less than value for the range query
+func (q *RangeQueryImpl) LessThan(val interface{}) {
+	q.lt = val
 }
 
 func (q *RangeQueryImpl) matchNumeric(val float64) bool {
@@ -89,18 +89,8 @@ func (q *RangeQueryImpl) matchNumeric(val float64) bool {
 			return false
 		}
 	}
-	if q.gte != nil {
-		if gte, ok := q.gte.(float64); ok && val < gte {
-			return false
-		}
-	}
 	if q.lt != nil {
 		if lt, ok := q.lt.(float64); ok && val >= lt {
-			return false
-		}
-	}
-	if q.lte != nil {
-		if lte, ok := q.lte.(float64); ok && val > lte {
 			return false
 		}
 	}
@@ -109,26 +99,47 @@ func (q *RangeQueryImpl) matchNumeric(val float64) bool {
 
 func (q *RangeQueryImpl) matchTime(val time.Time) bool {
 	if q.gt != nil {
-		if gt, ok := q.gt.(time.Time); ok && !val.After(gt) {
-			return false
-		}
-	}
-	if q.gte != nil {
-		if gte, ok := q.gte.(time.Time); ok && val.Before(gte) {
+		if gt, ok := q.gt.(time.Time); ok && val.Before(gt) || val.Equal(gt) {
 			return false
 		}
 	}
 	if q.lt != nil {
-		if lt, ok := q.lt.(time.Time); ok && !val.Before(lt) {
-			return false
-		}
-	}
-	if q.lte != nil {
-		if lte, ok := q.lte.(time.Time); ok && val.After(lte) {
+		if lt, ok := q.lt.(time.Time); ok && val.After(lt) || val.Equal(lt) {
 			return false
 		}
 	}
 	return true
+}
+
+func (q *RangeQueryImpl) Match(value interface{}) bool {
+	switch v := value.(type) {
+	case float64:
+		if q.gt != nil {
+			if _, ok := q.gt.(float64); !ok {
+				return false
+			}
+		}
+		if q.lt != nil {
+			if _, ok := q.lt.(float64); !ok {
+				return false
+			}
+		}
+		return q.matchNumeric(v)
+	case time.Time:
+		if q.gt != nil {
+			if _, ok := q.gt.(time.Time); !ok {
+				return false
+			}
+		}
+		if q.lt != nil {
+			if _, ok := q.lt.(time.Time); !ok {
+				return false
+			}
+		}
+		return q.matchTime(v)
+	default:
+		return false
+	}
 }
 
 // BooleanQueryImpl represents a boolean combination of queries
@@ -146,6 +157,9 @@ func NewBooleanQuery() *BooleanQueryImpl {
 
 func (q *BooleanQueryImpl) Type() QueryType { return BooleanQuery }
 func (q *BooleanQueryImpl) Field() string   { return q.field }
+
+func (q *BooleanQueryImpl) Must() []Query   { return q.must }
+func (q *BooleanQueryImpl) Should() []Query { return q.should }
 
 func (q *BooleanQueryImpl) AddMust(query Query)    { q.must = append(q.must, query) }
 func (q *BooleanQueryImpl) AddShould(query Query)  { q.should = append(q.should, query) }
@@ -232,7 +246,7 @@ func NewMatchQuery(field, text string) *MatchQueryImpl {
 	return &MatchQueryImpl{field: field, text: text}
 }
 
-func (q *MatchQueryImpl) Type() QueryType { return TermQuery }
+func (q *MatchQueryImpl) Type() QueryType { return MatchQuery }
 func (q *MatchQueryImpl) Field() string   { return q.field }
 func (q *MatchQueryImpl) Match(value interface{}) bool {
 	if str, ok := value.(string); ok {
@@ -253,7 +267,7 @@ func NewMatchPhraseQuery(field, phrase string) *MatchPhraseQueryImpl {
 	return &MatchPhraseQueryImpl{field: field, phrase: phrase}
 }
 
-func (q *MatchPhraseQueryImpl) Type() QueryType { return PhraseQuery }
+func (q *MatchPhraseQueryImpl) Type() QueryType { return MatchPhraseQuery }
 func (q *MatchPhraseQueryImpl) Field() string   { return q.field }
 func (q *MatchPhraseQueryImpl) Match(value interface{}) bool {
 	if str, ok := value.(string); ok {
@@ -271,7 +285,7 @@ func NewMatchAllQuery() *MatchAllQueryImpl {
 	return &MatchAllQueryImpl{}
 }
 
-func (q *MatchAllQueryImpl) Type() QueryType { return TermQuery }
+func (q *MatchAllQueryImpl) Type() QueryType { return MatchAllQuery }
 func (q *MatchAllQueryImpl) Field() string   { return "" }
 func (q *MatchAllQueryImpl) Match(value interface{}) bool {
 	return true
@@ -353,13 +367,9 @@ func (m *QueryMapper) mapRangeQuery(body interface{}) (Query, error) {
 		for op, val := range condMap {
 			switch op {
 			case "gt":
-				query.SetGT(val)
-			case "gte":
-				query.SetGTE(val)
+				query.GreaterThan(val)
 			case "lt":
-				query.SetLT(val)
-			case "lte":
-				query.SetLTE(val)
+				query.LessThan(val)
 			default:
 				return nil, fmt.Errorf("unsupported range operator: %s", op)
 			}
