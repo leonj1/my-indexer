@@ -99,12 +99,12 @@ func (q *RangeQueryImpl) matchNumeric(val float64) bool {
 
 func (q *RangeQueryImpl) matchTime(val time.Time) bool {
 	if q.gt != nil {
-		if gt, ok := q.gt.(time.Time); ok && val.Before(gt) || val.Equal(gt) {
+		if gt, ok := q.gt.(time.Time); ok && (val.Before(gt) || val.Equal(gt)) {
 			return false
 		}
 	}
 	if q.lt != nil {
-		if lt, ok := q.lt.(time.Time); ok && val.After(lt) || val.Equal(lt) {
+		if lt, ok := q.lt.(time.Time); ok && (val.After(lt) || val.Equal(lt)) {
 			return false
 		}
 	}
