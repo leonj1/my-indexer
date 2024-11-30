@@ -2,6 +2,15 @@
 
 A Python client library for using My Indexer as a library for full-text search and document indexing. This client provides direct access to the indexing and search capabilities without requiring a running server.
 
+## Purpose
+
+This client allows you to:
+- Create and manage document indices with persistent storage
+- Index documents with custom fields
+- Perform full-text search with Elasticsearch-like query syntax
+- Store indices in custom locations with `.gob` files
+- Work with the indexer directly in your Python code without HTTP overhead
+
 ## Features
 
 - Full-text search with Elasticsearch-like query syntax
@@ -10,11 +19,11 @@ A Python client library for using My Indexer as a library for full-text search a
 - Built-in text analysis with StandardAnalyzer
 - Type-safe document handling
 - Zero external dependencies (no server required)
+- Custom index file locations
 
 ## Installation
 
-### Development Installation
-Since this package is not yet published to PyPI, you'll need to install it directly from the source:
+Since this package is not yet published to PyPI, install it directly from the source:
 
 ```bash
 # Clone the repository
@@ -24,9 +33,6 @@ cd my-indexer
 # Install the package in development mode
 pip install -e examples/my-indexer-client/python-client
 ```
-
-### Dependencies
-The client requires Python 3.7 or later.
 
 ## Quick Start
 
@@ -99,37 +105,6 @@ doc = index.get_document(1)
 all_docs = index.get_all_documents()
 ```
 
-### Search Operations
-
-#### Basic Search
-```python
-# Simple match query
-query = {
-    "match": {
-        "content": "search term"
-    }
-}
-results = index.search(query)
-```
-
-#### Advanced Queries
-```python
-# Multi-field match
-query = {
-    "multi_match": {
-        "query": "python",
-        "fields": ["title", "content"]
-    }
-}
-
-# Term query (exact match)
-query = {
-    "term": {
-        "tags": "python"
-    }
-}
-```
-
 ### Storage Management
 
 #### Custom Storage Location
@@ -146,36 +121,49 @@ loaded_storage = IndexStorage("custom_path/index.gob")
 loaded_index = Index(analyzer, storage=loaded_storage)
 ```
 
+### Running the Example
+
+The repository includes a complete example that demonstrates all features:
+
+```bash
+# Make sure you're in the repository root
+cd my-indexer
+
+# Run the example
+python examples/my-indexer-client/python-client/examples/basic_usage.py
+```
+
+The example will:
+1. Create an index with a custom filename
+2. Add several test documents
+3. Perform search operations
+4. Save the index to disk
+5. Load the index from disk to verify persistence
+
 ## Best Practices
 
 1. **Storage Management**
    - Always call `index.save()` after making changes
    - Use descriptive filenames for different indices
-   - Validate filenames to avoid path traversal
+   - Store indices in appropriate locations (e.g., data directory)
 
 2. **Document Structure**
    - Keep field names consistent across documents
-   - Consider field types when querying
    - Use meaningful field names
+   - Consider field content when designing searches
 
-3. **Search Optimization**
-   - Use specific field names in queries
-   - Structure queries according to search needs
-   - Consider using multi_match for broader searches
+3. **Error Handling**
+   ```python
+   try:
+       doc = index.get_document(999)
+   except KeyError:
+       print("Document not found")
 
-## Error Handling
-
-```python
-try:
-    doc = index.get_document(999)
-except KeyError:
-    print("Document not found")
-
-try:
-    storage = IndexStorage("invalid/path/index.gob")
-except ValueError:
-    print("Invalid storage path")
-```
+   try:
+       storage = IndexStorage("invalid/path/index.gob")
+   except ValueError:
+       print("Invalid storage path")
+   ```
 
 ## Contributing
 
