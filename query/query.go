@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -221,6 +222,61 @@ func (q *BooleanQueryImpl) Match(value interface{}) bool {
 	return true
 }
 
+// MatchQueryImpl represents a match query that matches analyzed text
+type MatchQueryImpl struct {
+	field string
+	text  string
+}
+
+func NewMatchQuery(field, text string) *MatchQueryImpl {
+	return &MatchQueryImpl{field: field, text: text}
+}
+
+func (q *MatchQueryImpl) Type() QueryType { return TermQuery }
+func (q *MatchQueryImpl) Field() string   { return q.field }
+func (q *MatchQueryImpl) Match(value interface{}) bool {
+	if str, ok := value.(string); ok {
+		// For now, we'll do a simple case-insensitive contains check
+		// In a real implementation, this would use the analyzer
+		return strings.Contains(strings.ToLower(str), strings.ToLower(q.text))
+	}
+	return false
+}
+
+// MatchPhraseQueryImpl represents a match_phrase query that matches exact phrases
+type MatchPhraseQueryImpl struct {
+	field  string
+	phrase string
+}
+
+func NewMatchPhraseQuery(field, phrase string) *MatchPhraseQueryImpl {
+	return &MatchPhraseQueryImpl{field: field, phrase: phrase}
+}
+
+func (q *MatchPhraseQueryImpl) Type() QueryType { return PhraseQuery }
+func (q *MatchPhraseQueryImpl) Field() string   { return q.field }
+func (q *MatchPhraseQueryImpl) Match(value interface{}) bool {
+	if str, ok := value.(string); ok {
+		// For now, we'll do a simple case-insensitive exact match
+		// In a real implementation, this would use the analyzer
+		return strings.EqualFold(str, q.phrase)
+	}
+	return false
+}
+
+// MatchAllQueryImpl represents a match_all query that matches all documents
+type MatchAllQueryImpl struct{}
+
+func NewMatchAllQuery() *MatchAllQueryImpl {
+	return &MatchAllQueryImpl{}
+}
+
+func (q *MatchAllQueryImpl) Type() QueryType { return TermQuery }
+func (q *MatchAllQueryImpl) Field() string   { return "" }
+func (q *MatchAllQueryImpl) Match(value interface{}) bool {
+	return true
+}
+
 // QueryMapper maps ElasticSearch DSL queries to internal query representations
 type QueryMapper struct{}
 
@@ -238,6 +294,12 @@ func (m *QueryMapper) MapQuery(dslQuery map[string]interface{}) (Query, error) {
 		switch queryType {
 		case "term":
 			return m.mapTermQuery(queryBody)
+		case "match":
+			return m.mapMatchQuery(queryBody)
+		case "match_phrase":
+			return m.mapMatchPhraseQuery(queryBody)
+		case "match_all":
+			return NewMatchAllQuery(), nil
 		case "range":
 			return m.mapRangeQuery(queryBody)
 		case "bool":
@@ -347,4 +409,54 @@ func (m *QueryMapper) mapBoolQuery(body interface{}) (Query, error) {
 	}
 
 	return query, nil
+}
+
+func (m *QueryMapper) mapMatchQuery(body interface{}) (Query, error) {
+	matchBody, ok := body.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid match query structure")
+	}
+
+	if len(matchBody) != 1 {
+		return nil, fmt.Errorf("match query must specify exactly one field")
+	}
+
+	for field, value := range matchBody {
+		switch v := value.(type) {
+		case string:
+			return NewMatchQuery(field, v), nil
+		case map[string]interface{}:
+			if query, ok := v["query"].(string); ok {
+				return NewMatchQuery(field, query), nil
+			}
+		}
+		return nil, fmt.Errorf("invalid match query value")
+	}
+
+	return nil, fmt.Errorf("invalid match query structure")
+}
+
+func (m *QueryMapper) mapMatchPhraseQuery(body interface{}) (Query, error) {
+	phraseBody, ok := body.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid match_phrase query structure")
+	}
+
+	if len(phraseBody) != 1 {
+		return nil, fmt.Errorf("match_phrase query must specify exactly one field")
+	}
+
+	for field, value := range phraseBody {
+		switch v := value.(type) {
+		case string:
+			return NewMatchPhraseQuery(field, v), nil
+		case map[string]interface{}:
+			if query, ok := v["query"].(string); ok {
+				return NewMatchPhraseQuery(field, query), nil
+			}
+		}
+		return nil, fmt.Errorf("invalid match_phrase query value")
+	}
+
+	return nil, fmt.Errorf("invalid match_phrase query structure")
 }
