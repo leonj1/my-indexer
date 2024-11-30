@@ -2,12 +2,14 @@
 
 ![Robot Indexer](robot-indexer.jpg)
 
-My-Indexer is a lightweight, concurrent full-text search engine written in Go. It provides fast and efficient text indexing and searching capabilities with support for complex queries, making it ideal for applications that need embedded search functionality.
+My-Indexer is a lightweight, concurrent full-text search engine written in Go. It provides fast and efficient text indexing and searching capabilities with support for complex queries and Elasticsearch-compatible DSL, making it ideal for applications that need embedded search functionality.
 
 ## Features
 
-- **Full-Text Search**: Support for term, phrase, and field-specific queries
-- **Complex Query Support**: Boolean operators (AND, OR) for advanced search combinations
+- **Full-Text Search**: Support for term, match, prefix, and field-specific queries
+- **Elasticsearch-Compatible DSL**: Query using familiar Elasticsearch query syntax
+- **Complex Query Support**: Boolean queries with must, should, and must_not clauses
+- **Range Queries**: Support for numeric and date range searches
 - **Concurrent Operations**: Thread-safe design supporting multiple simultaneous readers and writers
 - **Transaction Support**: ACID-compliant operations with rollback capability
 - **Crash Recovery**: Built-in transaction logging for durability
@@ -22,8 +24,9 @@ While SQLite FTS is an excellent choice for many applications, My-Indexer offers
 | Feature | My-Indexer | SQLite FTS |
 |---------|------------|------------|
 | Memory Usage | Optimized in-memory index | Disk-based storage |
+| Query Language | Elasticsearch-compatible DSL | SQL-based queries |
 | Concurrency | Native Go concurrency with multiple readers/writers | Single writer, multiple readers |
-| Query Types | Custom query language with field-specific searches | SQL-based queries |
+| Query Types | Rich query types (term, match, prefix, range) | Basic full-text search |
 | Customization | Extensible analyzers and filters | Limited customization options |
 | Integration | Native Go API | Requires SQLite bindings |
 | Dependencies | Zero external dependencies | Requires SQLite library |
@@ -42,6 +45,7 @@ package main
 import (
     "fmt"
     "github.com/yourusername/my-indexer/index"
+    "github.com/yourusername/my-indexer/elastic"
 )
 
 func main() {
@@ -49,13 +53,37 @@ func main() {
     idx := index.NewIndex()
 
     // Add a document
-    doc := index.NewDocument()
-    doc.AddField("title", "Go Programming")
-    doc.AddField("content", "Go is a statically typed, compiled programming language.")
+    doc := map[string]interface{}{
+        "title": "Go Programming",
+        "content": "Go is a statically typed, compiled programming language.",
+        "tags": []string{"golang", "programming"},
+        "year": 2012,
+    }
     idx.AddDocument(doc)
 
-    // Search the index
-    query := "programming language"
+    // Create a bool query
+    query := map[string]interface{}{
+        "query": map[string]interface{}{
+            "bool": map[string]interface{}{
+                "must": []interface{}{
+                    map[string]interface{}{
+                        "match": map[string]interface{}{
+                            "content": "programming",
+                        },
+                    },
+                    map[string]interface{}{
+                        "range": map[string]interface{}{
+                            "year": map[string]interface{}{
+                                "gte": 2010,
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+    // Search using Elasticsearch DSL
     results, err := idx.Search(query)
     if err != nil {
         panic(err)
@@ -68,16 +96,87 @@ func main() {
 }
 ```
 
-## Query Syntax
+## Query Examples
 
-My-Indexer supports a rich query syntax:
+My-Indexer supports Elasticsearch-compatible DSL queries:
 
-- **Term Query**: `programming`
-- **Phrase Query**: `"go programming"`
-- **Field Query**: `title:golang`
-- **Boolean Queries**:
-  - AND: `go AND programming`
-  - OR: `golang OR rust`
+### Term Query
+```json
+{
+  "query": {
+    "term": {
+      "title": "golang"
+    }
+  }
+}
+```
+
+### Match Query
+```json
+{
+  "query": {
+    "match": {
+      "content": "go programming"
+    }
+  }
+}
+```
+
+### Prefix Query
+```json
+{
+  "query": {
+    "prefix": {
+      "title": "go"
+    }
+  }
+}
+```
+
+### Range Query
+```json
+{
+  "query": {
+    "range": {
+      "year": {
+        "gte": 2010,
+        "lt": 2024
+      }
+    }
+  }
+}
+```
+
+### Boolean Query
+```json
+{
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "match": {
+            "content": "programming"
+          }
+        }
+      ],
+      "should": [
+        {
+          "term": {
+            "tags": "golang"
+          }
+        }
+      ],
+      "must_not": [
+        {
+          "term": {
+            "tags": "python"
+          }
+        }
+      ]
+    }
+  }
+}
+```
 
 ## Building from Source
 
@@ -102,41 +201,17 @@ make test
 ```
 my-indexer/
 ├── analysis/       # Text analysis and tokenization
-├── document/      # Document representation
-├── index/         # Core indexing functionality
+├── elastic/        # Elasticsearch-compatible DSL implementation
+├── index/         # Core indexing and search functionality
+├── logger/        # Logging and monitoring
 ├── query/         # Query parsing and execution
-├── search/        # Search implementation
-├── storage/       # Storage management
-└── txlog/         # Transaction logging
+└── router/        # HTTP API endpoints
 ```
-
-## Performance
-
-My-Indexer is designed for high performance:
-
-- Concurrent read/write operations
-- Optimized in-memory index structure
-- Efficient query execution
-- Low memory footprint
 
 ## Contributing
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Inspired by Lucene's architecture and SQLite FTS
-- Built with Go's excellent concurrency primitives
-- Special thanks to all contributors
-
-## Contact
-
-If you have any questions or suggestions, please open an issue on GitHub.

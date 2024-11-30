@@ -18,7 +18,7 @@ func TestIndexStorage(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create storage
-	storage, err := NewIndexStorage(tempDir)
+	storage, err := NewIndexStorage(tempDir, "")
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestConcurrentAccess(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create storage
-	storage, err := NewIndexStorage(tempDir)
+	storage, err := NewIndexStorage(tempDir, "")
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}

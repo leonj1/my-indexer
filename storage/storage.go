@@ -30,11 +30,21 @@ type DocumentData struct {
 	Fields map[string]document.Field
 }
 
+const (
+	// DefaultIndexFilename is the default name for the index file
+	DefaultIndexFilename = "index.gob"
+)
+
 // NewIndexStorage creates a new index storage
-func NewIndexStorage(baseDir string) (*IndexStorage, error) {
+func NewIndexStorage(baseDir string, indexFilename string) (*IndexStorage, error) {
 	// Create base directory if it doesn't exist
 	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create base directory: %w", err)
+	}
+
+	// If no index filename is provided, use the default
+	if indexFilename == "" {
+		indexFilename = DefaultIndexFilename
 	}
 
 	// Create documents directory
@@ -44,7 +54,7 @@ func NewIndexStorage(baseDir string) (*IndexStorage, error) {
 	}
 
 	return &IndexStorage{
-		indexPath:    filepath.Join(baseDir, "index.gob"),
+		indexPath:    filepath.Join(baseDir, indexFilename),
 		documentsDir: documentsDir,
 	}, nil
 }
