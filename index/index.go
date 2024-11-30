@@ -219,7 +219,11 @@ func (idx *Index) addDocumentInternal(doc *document.Document) (int, error) {
 	idx.docIDMap[docID] = doc
 
 	// Track total term frequencies across all fields
-	docTermFreqs := make(map[string]int)
+	type termInfo struct {
+		freq   int
+		fields []string
+	}
+	docTermInfo := make(map[string]*termInfo)
 
 	// First pass: collect term frequencies across all fields
 	for _, field := range doc.GetFields() {
@@ -230,12 +234,28 @@ func (idx *Index) addDocumentInternal(doc *document.Document) (int, error) {
 
 		tokens := idx.analyzer.Analyze(fieldValue)
 		for _, token := range tokens {
-			docTermFreqs[token.Text]++
+			info, exists := docTermInfo[token.Text]
+			if !exists {
+				info = &termInfo{fields: make([]string, 0)}
+				docTermInfo[token.Text] = info
+			}
+			info.freq++
+			// Only add field name once
+			fieldFound := false
+			for _, f := range info.fields {
+				if f == field.Name {
+					fieldFound = true
+					break
+				}
+			}
+			if !fieldFound {
+				info.fields = append(info.fields, field.Name)
+			}
 		}
 	}
 
 	// Second pass: update posting lists
-	for term, freq := range docTermFreqs {
+	for term, info := range docTermInfo {
 		postingList, exists := idx.terms[term]
 		if !exists {
 			postingList = &PostingList{
@@ -246,7 +266,8 @@ func (idx *Index) addDocumentInternal(doc *document.Document) (int, error) {
 
 		entry := &PostingEntry{
 			DocID:    docID,
-			TermFreq: freq,
+			TermFreq: info.freq,
+			Fields:   info.fields,
 		}
 		postingList.Postings[docID] = entry
 		postingList.DocFreq++
@@ -582,6 +603,13 @@ func (idx *Index) GetNextDocID() int {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 	return idx.nextDocID
+}
+
+// Analyzer returns the analyzer used by this index
+func (idx *Index) Analyzer() analysis.Analyzer {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	return idx.analyzer
 }
 
 // RestoreFromData restores the index state from serialized data

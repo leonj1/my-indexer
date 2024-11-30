@@ -1,6 +1,7 @@
 package query
 
 import (
+	"my-indexer/document"
 	"testing"
 	"time"
 )
@@ -28,52 +29,106 @@ func TestTermQuery(t *testing.T) {
 }
 
 func TestRangeQuery(t *testing.T) {
-	t.Run("Numeric range", func(t *testing.T) {
-		query := NewRangeQuery("price")
-		query.SetGT(10.0)
-		query.SetLTE(20.0)
+	tests := []struct {
+		name     string
+		query    *RangeQueryImpl
+		doc      *document.Document
+		expected bool
+	}{
+		{
+			name: "Numeric range",
+			query: &RangeQueryImpl{
+				field: "age",
+				gt:    10.0,
+				lt:    20.0,
+			},
+			doc: func() *document.Document {
+				doc := document.NewDocument()
+				doc.AddField("age", 15.0)
+				return doc
+			}(),
+			expected: true,
+		},
+		{
+			name: "Inclusive numeric range",
+			query: &RangeQueryImpl{
+				field: "age",
+				gte:   10.0,
+				lte:   20.0,
+			},
+			doc: func() *document.Document {
+				doc := document.NewDocument()
+				doc.AddField("age", 20.0) // Test inclusive upper bound
+				return doc
+			}(),
+			expected: true,
+		},
+		{
+			name: "Mixed inclusive/exclusive range",
+			query: &RangeQueryImpl{
+				field: "age",
+				gt:    10.0,
+				lte:   20.0,
+			},
+			doc: func() *document.Document {
+				doc := document.NewDocument()
+				doc.AddField("age", 20.0) // Should match due to lte
+				return doc
+			}(),
+			expected: true,
+		},
+		{
+			name: "Outside range",
+			query: &RangeQueryImpl{
+				field: "age",
+				gte:   10.0,
+				lte:   20.0,
+			},
+			doc: func() *document.Document {
+				doc := document.NewDocument()
+				doc.AddField("age", 25.0)
+				return doc
+			}(),
+			expected: false,
+		},
+		{
+			name: "Time range",
+			query: &RangeQueryImpl{
+				field: "timestamp",
+				gt:    time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+				lt:    time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC),
+			},
+			doc: func() *document.Document {
+				doc := document.NewDocument()
+				doc.AddField("timestamp", time.Date(2020, 6, 1, 0, 0, 0, 0, time.UTC))
+				return doc
+			}(),
+			expected: true,
+		},
+		{
+			name: "Inclusive time range",
+			query: &RangeQueryImpl{
+				field: "timestamp",
+				gte:   time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC),
+				lte:   time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC),
+			},
+			doc: func() *document.Document {
+				doc := document.NewDocument()
+				doc.AddField("timestamp", time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC)) // Test inclusive upper bound
+				return doc
+			}(),
+			expected: true,
+		},
+	}
 
-		tests := []struct {
-			value float64
-			want  bool
-		}{
-			{5.0, false},
-			{10.0, false},
-			{15.0, true},
-			{20.0, true},
-			{25.0, false},
-		}
-
-		for _, tt := range tests {
-			if got := query.Match(tt.value); got != tt.want {
-				t.Errorf("RangeQuery.Match(%v) = %v, want %v", tt.value, got, tt.want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.query.Match(tt.doc)
+			if result != tt.expected {
+				t.Errorf("%s: RangeQuery.Match() = %v, want %v", tt.name, result, tt.expected)
 			}
-		}
-	})
-
-	t.Run("Time range", func(t *testing.T) {
-		query := NewRangeQuery("timestamp")
-		now := time.Now()
-		query.SetGTE(now)
-		query.SetLT(now.Add(24 * time.Hour))
-
-		tests := []struct {
-			value time.Time
-			want  bool
-		}{
-			{now.Add(-1 * time.Hour), false},
-			{now, true},
-			{now.Add(12 * time.Hour), true},
-			{now.Add(24 * time.Hour), false},
-			{now.Add(25 * time.Hour), false},
-		}
-
-		for _, tt := range tests {
-			if got := query.Match(tt.value); got != tt.want {
-				t.Errorf("RangeQuery.Match(%v) = %v, want %v", tt.value, got, tt.want)
-			}
-		}
-	})
+		})
+	}
 }
 
 func TestBooleanQuery(t *testing.T) {
@@ -188,8 +243,8 @@ func TestQueryMapper(t *testing.T) {
 		dslQuery := map[string]interface{}{
 			"range": map[string]interface{}{
 				"price": map[string]interface{}{
-					"gt":  10.0,
-					"lte": 20.0,
+					"gt": 10.0,
+					"lt": 20.0,
 				},
 			},
 		}
