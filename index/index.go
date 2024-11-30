@@ -636,3 +636,41 @@ func (idx *Index) Optimize() error {
 
 	return nil
 }
+
+// IndexDocument indexes an ElasticSearch-compatible document
+func (idx *Index) IndexDocument(indexName string, docID string, doc map[string]interface{}) error {
+    // Create new document
+    internalDoc := document.NewDocument()
+
+    // Copy all fields from the ElasticSearch document
+    for field, value := range doc {
+        // Skip metadata fields that start with _
+        if len(field) > 0 && field[0] == '_' {
+            continue
+        }
+        if err := internalDoc.AddField(field, value); err != nil {
+            return fmt.Errorf("failed to add field %s: %v", field, err)
+        }
+    }
+
+    // If docID is provided, try to update existing document
+    if docID != "" {
+        // Convert string docID to int
+        var intDocID int
+        _, err := fmt.Sscanf(docID, "%d", &intDocID)
+        if err != nil {
+            return fmt.Errorf("invalid document ID format: %v", err)
+        }
+
+        // Check if document exists
+        existingDoc, err := idx.GetDocument(intDocID)
+        if err == nil && existingDoc != nil {
+            // Update existing document
+            return idx.UpdateDocument(intDocID, internalDoc)
+        }
+    }
+
+    // Add as new document
+    _, err := idx.AddDocument(internalDoc)
+    return err
+}

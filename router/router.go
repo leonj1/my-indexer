@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"my-indexer/logger"
 	"my-indexer/index"
@@ -74,6 +75,11 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	if strings.HasSuffix(req.URL.Path, "/_index") {
+		r.handleIndex(w, req)
+		return
+	}
+
 	// Not found
 	http.NotFound(w, req)
 }
@@ -82,6 +88,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (r *Router) RegisterElasticSearchHandlers() {
 	// Document API endpoints
 	r.mux.HandleFunc("/", r.handleDocument)                // Single document operations (matches /index/_doc/id)
+	r.mux.HandleFunc("/_index", r.handleIndex)            // Index API endpoint
 	r.mux.HandleFunc("/_bulk", r.handleBulk)              // Bulk operations
 	r.mux.HandleFunc("/_search", r.handleSearch)          // Search
 	r.mux.HandleFunc("/_msearch", r.handleMultiSearch)    // Multi-search
@@ -89,8 +96,21 @@ func (r *Router) RegisterElasticSearchHandlers() {
 	r.mux.HandleFunc("/_scroll", r.handleScroll)          // Scroll API
 }
 
+// ElasticSearchResponse represents a standard ES response format
+type ElasticSearchResponse struct {
+	Took     int  `json:"took"`
+	TimedOut bool `json:"timed_out"`
+	Shards   struct {
+		Total      int `json:"total"`
+		Successful int `json:"successful"`
+		Failed     int `json:"failed"`
+	} `json:"_shards"`
+	Result string `json:"result,omitempty"`
+	Status int    `json:"status,omitempty"`
+}
+
 // errorResponse sends an error response in JSON format
-func errorResponse(w http.ResponseWriter, code int, message string) {
+func (r *Router) errorResponse(w http.ResponseWriter, code int, message string) {
 	logger.Error("Error response: %s (code: %d)", message, code)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -103,13 +123,13 @@ func (r *Router) handleDocument(w http.ResponseWriter, req *http.Request) {
 
 	// Check method first
 	if req.Method != http.MethodPut && req.Method != http.MethodGet && req.Method != http.MethodDelete {
-		errorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		r.errorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 
 	// Validate the request
 	if err := validateDocumentRequest(req); err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		r.errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -159,21 +179,21 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 
 	// Check method first
 	if req.Method != http.MethodGet && req.Method != http.MethodPost {
-		errorResponse(w, http.StatusMethodNotAllowed, "only GET and POST methods are allowed")
+		r.errorResponse(w, http.StatusMethodNotAllowed, "only GET and POST methods are allowed")
 		return
 	}
 
 	// Extract index name from path
 	parts := strings.Split(req.URL.Path, "/")
 	if len(parts) < 3 {
-		errorResponse(w, http.StatusBadRequest, "invalid index name")
+		r.errorResponse(w, http.StatusBadRequest, "invalid index name")
 		return
 	}
 	indexName := parts[1]
 
 	// Validate the request
 	if err := validateSearchRequest(req); err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		r.errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -196,7 +216,7 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) handleMultiSearch(w http.ResponseWriter, req *http.Request) {
 	if err := validateSearchRequest(req); err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		r.errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// TODO: Implement multi-search
@@ -205,7 +225,7 @@ func (r *Router) handleMultiSearch(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) handleListIndices(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
-		errorResponse(w, http.StatusMethodNotAllowed, "only GET method is allowed")
+		r.errorResponse(w, http.StatusMethodNotAllowed, "only GET method is allowed")
 		return
 	}
 	// TODO: Implement list indices
@@ -214,9 +234,66 @@ func (r *Router) handleListIndices(w http.ResponseWriter, req *http.Request) {
 
 func (r *Router) handleScroll(w http.ResponseWriter, req *http.Request) {
 	if err := validateSearchRequest(req); err != nil {
-		errorResponse(w, http.StatusBadRequest, err.Error())
+		r.errorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// TODO: Implement scroll API
 	http.Error(w, "Not implemented", http.StatusNotImplemented)
+}
+
+func (r *Router) handleIndex(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost && req.Method != http.MethodPut {
+		r.errorResponse(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	// Parse the request body
+	var doc map[string]interface{}
+	if err := json.NewDecoder(req.Body).Decode(&doc); err != nil {
+		r.errorResponse(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Extract index name and document ID from URL path
+	parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+	if len(parts) < 1 {
+		r.errorResponse(w, http.StatusBadRequest, "invalid index path")
+		return
+	}
+
+	indexName := parts[0]
+	docID := ""
+	if len(parts) > 1 {
+		docID = parts[1]
+	}
+
+	// Index the document
+	startTime := time.Now()
+	err := r.index.IndexDocument(indexName, docID, doc)
+	if err != nil {
+		r.errorResponse(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Prepare ElasticSearch-compatible response
+	resp := ElasticSearchResponse{
+		Took:     int(time.Since(startTime).Milliseconds()),
+		TimedOut: false,
+		Shards: struct {
+			Total      int `json:"total"`
+			Successful int `json:"successful"`
+			Failed     int `json:"failed"`
+		}{
+			Total:      1,
+			Successful: 1,
+			Failed:     0,
+		},
+		Result: "created",
+		Status: http.StatusCreated,
+	}
+
+	// Send response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(resp)
 }
