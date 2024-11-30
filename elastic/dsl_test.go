@@ -117,76 +117,193 @@ func TestParseQuery(t *testing.T) {
 }
 
 func TestParseComplexQueries(t *testing.T) {
-	query := `{
-		"query": {
-			"bool": {
-				"must": [
-					{
-						"match": {
-							"title": "golang"
-						}
-					},
-					{
-						"range": {
-							"year": {
-								"gte": 2020
+	tests := []struct {
+		name    string
+		query   string
+		wantErr bool
+		validate func(*testing.T, Query)
+	}{
+		{
+			name: "Valid complex bool query",
+			query: `{
+				"query": {
+					"bool": {
+						"must": [
+							{
+								"match": {
+									"title": "golang"
+								}
+							},
+							{
+								"range": {
+									"year": {
+										"gte": 2020
+									}
+								}
 							}
-						}
+						],
+						"should": [
+							{
+								"term": {
+									"tags": "programming"
+								}
+							}
+						],
+						"must_not": [
+							{
+								"term": {
+									"status": "draft"
+								}
+							}
+						],
+						"filter": [
+							{
+								"term": {
+									"published": true
+								}
+							}
+						]
 					}
-				],
-				"should": [
-					{
-						"term": {
-							"tags": "programming"
-						}
+				}
+			}`,
+			wantErr: false,
+			validate: func(t *testing.T, q Query) {
+				boolQuery, ok := q.(*BoolQueryClause)
+				if !ok {
+					t.Fatal("Expected BoolQueryClause")
+				}
+
+				// Validate must clauses
+				if len(boolQuery.Must) != 2 {
+					t.Errorf("Expected 2 must clauses, got %d", len(boolQuery.Must))
+				}
+
+				// Validate match query in must clause
+				if matchQuery, ok := boolQuery.Must[0].(*MatchQueryClause); ok {
+					if matchQuery.Field != "title" || matchQuery.Value != "golang" {
+						t.Errorf("Expected match query with field='title', value='golang', got field='%s', value='%v'",
+							matchQuery.Field, matchQuery.Value)
 					}
-				],
-				"must_not": [
-					{
-						"term": {
-							"status": "draft"
-						}
+				} else {
+					t.Error("First must clause should be a MatchQueryClause")
+				}
+
+				// Validate range query in must clause
+				if rangeQuery, ok := boolQuery.Must[1].(*RangeQueryClause); ok {
+					if rangeQuery.Field != "year" {
+						t.Errorf("Expected range query with field='year', got field='%s'", rangeQuery.Field)
 					}
-				],
-				"filter": [
-					{
-						"term": {
-							"published": true
-						}
+					if rangeQuery.GTE != float64(2020) {
+						t.Errorf("Expected range query with gte=2020, got %v", rangeQuery.GTE)
 					}
-				]
+				} else {
+					t.Error("Second must clause should be a RangeQueryClause")
+				}
+
+				// Validate should clause
+				if len(boolQuery.Should) != 1 {
+					t.Errorf("Expected 1 should clause, got %d", len(boolQuery.Should))
+				}
+				if termQuery, ok := boolQuery.Should[0].(*TermQueryClause); ok {
+					if termQuery.Field != "tags" || termQuery.Value != "programming" {
+						t.Errorf("Expected term query with field='tags', value='programming', got field='%s', value='%v'",
+							termQuery.Field, termQuery.Value)
+					}
+				} else {
+					t.Error("Should clause should be a TermQueryClause")
+				}
+
+				// Validate must_not clause
+				if len(boolQuery.MustNot) != 1 {
+					t.Errorf("Expected 1 must_not clause, got %d", len(boolQuery.MustNot))
+				}
+				if termQuery, ok := boolQuery.MustNot[0].(*TermQueryClause); ok {
+					if termQuery.Field != "status" || termQuery.Value != "draft" {
+						t.Errorf("Expected term query with field='status', value='draft', got field='%s', value='%v'",
+							termQuery.Field, termQuery.Value)
+					}
+				} else {
+					t.Error("Must_not clause should be a TermQueryClause")
+				}
+
+				// Validate filter clause
+				if len(boolQuery.Filter) != 1 {
+					t.Errorf("Expected 1 filter clause, got %d", len(boolQuery.Filter))
+				}
+				if termQuery, ok := boolQuery.Filter[0].(*TermQueryClause); ok {
+					if termQuery.Field != "published" || termQuery.Value != true {
+						t.Errorf("Expected term query with field='published', value=true, got field='%s', value=%v",
+							termQuery.Field, termQuery.Value)
+					}
+				} else {
+					t.Error("Filter clause should be a TermQueryClause")
+				}
+			},
+		},
+		{
+			name: "Invalid - duplicate must clauses",
+			query: `{
+				"query": {
+					"bool": {
+						"must": [
+							{
+								"match": {
+									"title": "golang"
+								}
+							},
+							{
+								"match": {
+									"title": "golang"
+								}
+							}
+						]
+					}
+				}
+			}`,
+			wantErr: true,
+		},
+		{
+			name: "Invalid - nested bool exceeds depth",
+			query: `{
+				"query": {
+					"bool": {
+						"must": [
+							{
+								"bool": {
+									"must": [
+										{
+											"bool": {
+												"must": [
+													{
+														"match": {
+															"title": "golang"
+														}
+													}
+												]
+											}
+										}
+									]
+								}
+							}
+						]
+					}
+				}
+			}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q, err := ParseQuery([]byte(tt.query))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseQuery() error = %v, wantErr %v", err, tt.wantErr)
+				return
 			}
-		}
-	}`
-
-	q, err := ParseQuery([]byte(query))
-	if err != nil {
-		t.Fatalf("ParseQuery() error = %v", err)
-	}
-
-	boolQuery, ok := q.(*BoolQueryClause)
-	if !ok {
-		t.Fatal("Expected BoolQueryClause")
-	}
-
-	// Validate must clauses
-	if len(boolQuery.Must) != 2 {
-		t.Errorf("Expected 2 must clauses, got %d", len(boolQuery.Must))
-	}
-
-	// Validate should clauses
-	if len(boolQuery.Should) != 1 {
-		t.Errorf("Expected 1 should clause, got %d", len(boolQuery.Should))
-	}
-
-	// Validate must_not clauses
-	if len(boolQuery.MustNot) != 1 {
-		t.Errorf("Expected 1 must_not clause, got %d", len(boolQuery.MustNot))
-	}
-
-	// Validate filter clauses
-	if len(boolQuery.Filter) != 1 {
-		t.Errorf("Expected 1 filter clause, got %d", len(boolQuery.Filter))
+			if !tt.wantErr && tt.validate != nil {
+				tt.validate(t, q)
+			}
+		})
 	}
 }
 

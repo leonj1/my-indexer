@@ -185,160 +185,191 @@ func (q *BoolQueryClause) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// ParseQuery parses an Elasticsearch query DSL into our internal query representation
+const maxBoolNestingDepth = 2 // Maximum allowed nesting depth for bool queries
+
+type queryContext struct {
+	depth int
+	seenFields map[string]map[string]bool // clause type -> field -> seen
+}
+
+func newQueryContext() *queryContext {
+	return &queryContext{
+		depth: 0,
+		seenFields: make(map[string]map[string]bool),
+	}
+}
+
+func (ctx *queryContext) checkAndAddField(clauseType, field string) error {
+	if _, exists := ctx.seenFields[clauseType]; !exists {
+		ctx.seenFields[clauseType] = make(map[string]bool)
+	}
+	if ctx.seenFields[clauseType][field] {
+		return fmt.Errorf("duplicate field '%s' in clause type '%s'", field, clauseType)
+	}
+	ctx.seenFields[clauseType][field] = true
+	return nil
+}
+
 func ParseQuery(data []byte) (Query, error) {
-	var rawQuery map[string]interface{}
-	if err := json.Unmarshal(data, &rawQuery); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal query: %w", err)
+	var wrapper struct {
+		Query json.RawMessage `json:"query"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return nil, fmt.Errorf("failed to parse query wrapper: %v", err)
 	}
 
-	queryBody, ok := rawQuery["query"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid query structure: missing 'query' object")
-	}
-
-	return parseQueryBody(queryBody)
+	ctx := newQueryContext()
+	return parseQueryClause(wrapper.Query, ctx)
 }
 
-// parseQueryBody parses the actual query body
-func parseQueryBody(queryBody map[string]interface{}) (Query, error) {
-	// Check for each query type
-	if matchQuery, ok := queryBody["match"].(map[string]interface{}); ok {
-		return parseMatchQuery(matchQuery)
-	}
-	if termQuery, ok := queryBody["term"].(map[string]interface{}); ok {
-		return parseTermQuery(termQuery)
-	}
-	if rangeQuery, ok := queryBody["range"].(map[string]interface{}); ok {
-		return parseRangeQuery(rangeQuery)
-	}
-	if boolQuery, ok := queryBody["bool"].(map[string]interface{}); ok {
-		return parseBoolQuery(boolQuery)
+func parseQueryClause(data []byte, ctx *queryContext) (Query, error) {
+	var temp map[string]json.RawMessage
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return nil, fmt.Errorf("failed to parse query clause: %v", err)
 	}
 
-	return nil, fmt.Errorf("unsupported query type")
-}
+	for queryType, value := range temp {
+		switch queryType {
+		case "match":
+			var matchQuery struct {
+				Field string `json:"-"`
+				Value string
+			}
+			var raw map[string]string
+			if err := json.Unmarshal(value, &raw); err != nil {
+				return nil, fmt.Errorf("failed to parse match query: %v", err)
+			}
+			for field, val := range raw {
+				if err := ctx.checkAndAddField("match", field); err != nil {
+					return nil, err
+				}
+				matchQuery.Field = field
+				matchQuery.Value = val
+				return &MatchQueryClause{
+					BaseQuery: BaseQuery{queryType: MatchQuery},
+					Field: matchQuery.Field,
+					Value: matchQuery.Value,
+				}, nil
+			}
+			
+		case "term":
+			var termQuery struct {
+				Field string `json:"-"`
+				Value interface{}
+			}
+			var raw map[string]interface{}
+			if err := json.Unmarshal(value, &raw); err != nil {
+				return nil, fmt.Errorf("failed to parse term query: %v", err)
+			}
+			for field, val := range raw {
+				if err := ctx.checkAndAddField("term", field); err != nil {
+					return nil, err
+				}
+				termQuery.Field = field
+				termQuery.Value = val
+				return &TermQueryClause{
+					BaseQuery: BaseQuery{queryType: TermQuery},
+					Field: termQuery.Field,
+					Value: termQuery.Value,
+				}, nil
+			}
 
-func parseMatchQuery(matchQuery map[string]interface{}) (*MatchQueryClause, error) {
-	if len(matchQuery) != 1 {
-		return nil, fmt.Errorf("invalid match query structure")
-	}
+		case "range":
+			var raw map[string]map[string]interface{}
+			if err := json.Unmarshal(value, &raw); err != nil {
+				return nil, fmt.Errorf("failed to parse range query: %v", err)
+			}
 
-	for field, value := range matchQuery {
-		return &MatchQueryClause{
-			BaseQuery: BaseQuery{queryType: MatchQuery},
-			Field:     field,
-			Value:     value,
-		}, nil
-	}
+			for field, conditions := range raw {
+				if err := ctx.checkAndAddField("range", field); err != nil {
+					return nil, err
+				}
 
-	return nil, fmt.Errorf("invalid match query structure")
-}
+				rangeQuery := &RangeQueryClause{
+					BaseQuery: BaseQuery{queryType: RangeQuery},
+					Field:    field,
+				}
 
-func parseTermQuery(termQuery map[string]interface{}) (*TermQueryClause, error) {
-	if len(termQuery) != 1 {
-		return nil, fmt.Errorf("invalid term query structure")
-	}
+				for op, val := range conditions {
+					switch op {
+					case "gt":
+						rangeQuery.GT = val
+					case "gte":
+						rangeQuery.GTE = val
+					case "lt":
+						rangeQuery.LT = val
+					case "lte":
+						rangeQuery.LTE = val
+					default:
+						return nil, fmt.Errorf("invalid range operator: %s", op)
+					}
+				}
 
-	for field, value := range termQuery {
-		return &TermQueryClause{
-			BaseQuery: BaseQuery{queryType: TermQuery},
-			Field:     field,
-			Value:     value,
-		}, nil
-	}
+				return rangeQuery, nil
+			}
 
-	return nil, fmt.Errorf("invalid term query structure")
-}
+			return nil, fmt.Errorf("invalid range query structure")
 
-func parseRangeQuery(rangeQuery map[string]interface{}) (*RangeQueryClause, error) {
-	if len(rangeQuery) != 1 {
-		return nil, fmt.Errorf("invalid range query structure")
-	}
+		case "bool":
+			ctx.depth++
+			if ctx.depth > maxBoolNestingDepth {
+				return nil, fmt.Errorf("bool query nesting depth exceeds maximum allowed (%d)", maxBoolNestingDepth)
+			}
 
-	for field, conditions := range rangeQuery {
-		condMap, ok := conditions.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("invalid range query conditions")
+			var boolQuery struct {
+				Must    []json.RawMessage `json:"must,omitempty"`
+				Should  []json.RawMessage `json:"should,omitempty"`
+				MustNot []json.RawMessage `json:"must_not,omitempty"`
+				Filter  []json.RawMessage `json:"filter,omitempty"`
+			}
+			if err := json.Unmarshal(value, &boolQuery); err != nil {
+				return nil, fmt.Errorf("failed to parse bool query: %v", err)
+			}
+
+			result := &BoolQueryClause{
+				BaseQuery: BaseQuery{queryType: BoolQuery},
+			}
+
+			// Parse Must clauses
+			for _, clause := range boolQuery.Must {
+				q, err := parseQueryClause(clause, ctx)
+				if err != nil {
+					return nil, err
+				}
+				result.Must = append(result.Must, q)
+			}
+
+			// Parse Should clauses
+			for _, clause := range boolQuery.Should {
+				q, err := parseQueryClause(clause, ctx)
+				if err != nil {
+					return nil, err
+				}
+				result.Should = append(result.Should, q)
+			}
+
+			// Parse MustNot clauses
+			for _, clause := range boolQuery.MustNot {
+				q, err := parseQueryClause(clause, ctx)
+				if err != nil {
+					return nil, err
+				}
+				result.MustNot = append(result.MustNot, q)
+			}
+
+			// Parse Filter clauses
+			for _, clause := range boolQuery.Filter {
+				q, err := parseQueryClause(clause, ctx)
+				if err != nil {
+					return nil, err
+				}
+				result.Filter = append(result.Filter, q)
+			}
+
+			ctx.depth--
+			return result, nil
 		}
-
-		clause := &RangeQueryClause{
-			BaseQuery: BaseQuery{queryType: RangeQuery},
-			Field:     field,
-		}
-
-		if gt, ok := condMap["gt"]; ok {
-			clause.GT = gt
-		}
-		if gte, ok := condMap["gte"]; ok {
-			clause.GTE = gte
-		}
-		if lt, ok := condMap["lt"]; ok {
-			clause.LT = lt
-		}
-		if lte, ok := condMap["lte"]; ok {
-			clause.LTE = lte
-		}
-
-		return clause, nil
 	}
 
-	return nil, fmt.Errorf("invalid range query structure")
-}
-
-func parseBoolQuery(boolQuery map[string]interface{}) (*BoolQueryClause, error) {
-	clause := &BoolQueryClause{
-		BaseQuery: BaseQuery{queryType: BoolQuery},
-	}
-
-	if must, ok := boolQuery["must"].([]interface{}); ok {
-		queries, err := parseQueryList(must)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse must clauses: %w", err)
-		}
-		clause.Must = queries
-	}
-
-	if should, ok := boolQuery["should"].([]interface{}); ok {
-		queries, err := parseQueryList(should)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse should clauses: %w", err)
-		}
-		clause.Should = queries
-	}
-
-	if mustNot, ok := boolQuery["must_not"].([]interface{}); ok {
-		queries, err := parseQueryList(mustNot)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse must_not clauses: %w", err)
-		}
-		clause.MustNot = queries
-	}
-
-	if filter, ok := boolQuery["filter"].([]interface{}); ok {
-		queries, err := parseQueryList(filter)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse filter clauses: %w", err)
-		}
-		clause.Filter = queries
-	}
-
-	return clause, nil
-}
-
-func parseQueryList(queries []interface{}) ([]Query, error) {
-	result := make([]Query, 0, len(queries))
-	for _, q := range queries {
-		queryMap, ok := q.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("invalid query in list")
-		}
-
-		query, err := parseQueryBody(queryMap)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, query)
-	}
-	return result, nil
+	return nil, fmt.Errorf("invalid or unsupported query type")
 }
