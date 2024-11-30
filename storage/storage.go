@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"my-indexer/document"
@@ -35,6 +36,38 @@ const (
 	DefaultIndexFilename = "index.gob"
 )
 
+var (
+	// ErrInvalidFilename is returned when the provided index filename contains invalid characters or path traversal
+	ErrInvalidFilename = fmt.Errorf("invalid index filename: must not contain path separators or traversal sequences")
+)
+
+// validateIndexFilename checks if the provided filename is safe to use
+func validateIndexFilename(filename string) error {
+	if filename == "" {
+		return nil
+	}
+
+	// Check for path separators and directory traversal sequences
+	if filepath.Base(filename) != filename || 
+	   filepath.Clean(filename) != filename {
+		return ErrInvalidFilename
+	}
+
+	// Check for invalid characters in filename
+	for _, char := range []string{"<", ">", ":", "\"", "/", "\\", "|", "?", "*"} {
+		if strings.Contains(filename, char) {
+			return ErrInvalidFilename
+		}
+	}
+
+	// Ensure filename has .gob extension
+	if !strings.HasSuffix(filename, ".gob") {
+		return fmt.Errorf("invalid index filename: must have .gob extension")
+	}
+
+	return nil
+}
+
 // NewIndexStorage creates a new index storage
 func NewIndexStorage(baseDir string, indexFilename string) (*IndexStorage, error) {
 	// Create base directory if it doesn't exist
@@ -45,6 +78,11 @@ func NewIndexStorage(baseDir string, indexFilename string) (*IndexStorage, error
 	// If no index filename is provided, use the default
 	if indexFilename == "" {
 		indexFilename = DefaultIndexFilename
+	}
+
+	// Validate the index filename
+	if err := validateIndexFilename(indexFilename); err != nil {
+		return nil, err
 	}
 
 	// Create documents directory
