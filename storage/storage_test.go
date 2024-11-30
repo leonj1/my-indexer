@@ -18,7 +18,7 @@ func TestIndexStorage(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create storage
-	storage, err := NewIndexStorage(tempDir)
+	storage, err := NewIndexStorage(tempDir, "")
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
@@ -144,6 +144,50 @@ func TestIndexStorage(t *testing.T) {
 	}
 }
 
+func TestIndexStorageCustomFilename(t *testing.T) {
+	// Create temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "indexer-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Test invalid filenames
+	invalidNames := []string{
+		"../index.gob",          // Path traversal
+		"./index.gob",           // Path traversal
+		"subdir/index.gob",      // Path separator
+		"index<.gob",            // Invalid character <
+		"index>.gob",            // Invalid character >
+		"index:.gob",            // Invalid character :
+		"index\".gob",           // Invalid character "
+		"index?.gob",            // Invalid character ?
+		"index*.gob",            // Invalid character *
+		"index|.gob",            // Invalid character |
+		"index",                 // Missing extension
+		"index.txt",             // Wrong extension
+	}
+
+	for _, name := range invalidNames {
+		if _, err := NewIndexStorage(tempDir, name); err == nil {
+			t.Errorf("Expected error for invalid filename %q but got none", name)
+		}
+	}
+
+	// Test valid filenames
+	validNames := []string{
+		"",                  // Empty string (should use default)
+		"my-index.gob",     // Valid characters with hyphen
+		"index_test_123.gob", // Valid characters with underscore and numbers
+	}
+
+	for _, name := range validNames {
+		if _, err := NewIndexStorage(tempDir, name); err != nil {
+			t.Errorf("Unexpected error for valid filename %q: %v", name, err)
+		}
+	}
+}
+
 func TestConcurrentAccess(t *testing.T) {
 	// Create temporary directory for testing
 	tempDir, err := os.MkdirTemp("", "indexer-test-*")
@@ -153,7 +197,7 @@ func TestConcurrentAccess(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Create storage
-	storage, err := NewIndexStorage(tempDir)
+	storage, err := NewIndexStorage(tempDir, "")
 	if err != nil {
 		t.Fatalf("Failed to create storage: %v", err)
 	}
