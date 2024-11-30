@@ -2,6 +2,7 @@ package query
 
 import (
 	"fmt"
+	"my-indexer/document"
 	"strings"
 	"time"
 )
@@ -60,8 +61,10 @@ func (q *TermQueryImpl) Match(value interface{}) bool {
 // RangeQueryImpl implements a range query
 type RangeQueryImpl struct {
 	field string
-	gt    interface{}
-	lt    interface{}
+	gt    interface{} // Exclusive greater than
+	gte   interface{} // Inclusive greater than or equal
+	lt    interface{} // Exclusive less than
+	lte   interface{} // Inclusive less than or equal
 }
 
 func NewRangeQuery(field string) *RangeQueryImpl {
@@ -72,15 +75,31 @@ func (q *RangeQueryImpl) Type() QueryType { return RangeQuery }
 func (q *RangeQueryImpl) Field() string   { return q.field }
 func (q *RangeQueryImpl) Gt() interface{} { return q.gt }
 func (q *RangeQueryImpl) Lt() interface{} { return q.lt }
+func (q *RangeQueryImpl) Gte() interface{} { return q.gte }
+func (q *RangeQueryImpl) Lte() interface{} { return q.lte }
 
-// GreaterThan sets the greater than value for the range query
+// GreaterThan sets the exclusive greater than value for the range query
 func (q *RangeQueryImpl) GreaterThan(val interface{}) {
 	q.gt = val
+	q.gte = nil // Clear inclusive operator
 }
 
-// LessThan sets the less than value for the range query
+// GreaterThanOrEqual sets the inclusive greater than or equal value for the range query
+func (q *RangeQueryImpl) GreaterThanOrEqual(val interface{}) {
+	q.gte = val
+	q.gt = nil // Clear exclusive operator
+}
+
+// LessThan sets the exclusive less than value for the range query
 func (q *RangeQueryImpl) LessThan(val interface{}) {
 	q.lt = val
+	q.lte = nil // Clear inclusive operator
+}
+
+// LessThanOrEqual sets the inclusive less than or equal value for the range query
+func (q *RangeQueryImpl) LessThanOrEqual(val interface{}) {
+	q.lte = val
+	q.lt = nil // Clear exclusive operator
 }
 
 func (q *RangeQueryImpl) matchNumeric(val float64) bool {
@@ -89,8 +108,18 @@ func (q *RangeQueryImpl) matchNumeric(val float64) bool {
 			return false
 		}
 	}
+	if q.gte != nil {
+		if gte, ok := q.gte.(float64); ok && val < gte {
+			return false
+		}
+	}
 	if q.lt != nil {
 		if lt, ok := q.lt.(float64); ok && val >= lt {
+			return false
+		}
+	}
+	if q.lte != nil {
+		if lte, ok := q.lte.(float64); ok && val > lte {
 			return false
 		}
 	}
@@ -99,12 +128,22 @@ func (q *RangeQueryImpl) matchNumeric(val float64) bool {
 
 func (q *RangeQueryImpl) matchTime(val time.Time) bool {
 	if q.gt != nil {
-		if gt, ok := q.gt.(time.Time); ok && (val.Before(gt) || val.Equal(gt)) {
+		if gt, ok := q.gt.(time.Time); ok && !val.After(gt) {
+			return false
+		}
+	}
+	if q.gte != nil {
+		if gte, ok := q.gte.(time.Time); ok && val.Before(gte) {
 			return false
 		}
 	}
 	if q.lt != nil {
-		if lt, ok := q.lt.(time.Time); ok && (val.After(lt) || val.Equal(lt)) {
+		if lt, ok := q.lt.(time.Time); ok && !val.Before(lt) {
+			return false
+		}
+	}
+	if q.lte != nil {
+		if lte, ok := q.lte.(time.Time); ok && val.After(lte) {
 			return false
 		}
 	}
@@ -112,30 +151,30 @@ func (q *RangeQueryImpl) matchTime(val time.Time) bool {
 }
 
 func (q *RangeQueryImpl) Match(value interface{}) bool {
+	// Handle direct value comparison first
 	switch v := value.(type) {
 	case float64:
-		if q.gt != nil {
-			if _, ok := q.gt.(float64); !ok {
-				return false
-			}
-		}
-		if q.lt != nil {
-			if _, ok := q.lt.(float64); !ok {
-				return false
-			}
-		}
 		return q.matchNumeric(v)
 	case time.Time:
-		if q.gt != nil {
-			if _, ok := q.gt.(time.Time); !ok {
-				return false
-			}
-		}
-		if q.lt != nil {
-			if _, ok := q.lt.(time.Time); !ok {
-				return false
-			}
-		}
+		return q.matchTime(v)
+	}
+
+	// Handle document case
+	doc, ok := value.(*document.Document)
+	if !ok {
+		return false
+	}
+
+	field, err := doc.GetField(q.field)
+	if err != nil {
+		return false
+	}
+
+	// Handle field value comparison
+	switch v := field.Value.(type) {
+	case float64:
+		return q.matchNumeric(v)
+	case time.Time:
 		return q.matchTime(v)
 	default:
 		return false
@@ -368,8 +407,12 @@ func (m *QueryMapper) mapRangeQuery(body interface{}) (Query, error) {
 			switch op {
 			case "gt":
 				query.GreaterThan(val)
+			case "gte":
+				query.GreaterThanOrEqual(val)
 			case "lt":
 				query.LessThan(val)
+			case "lte":
+				query.LessThanOrEqual(val)
 			default:
 				return nil, fmt.Errorf("unsupported range operator: %s", op)
 			}

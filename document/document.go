@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // FieldType represents the type of a field value
@@ -16,6 +17,8 @@ const (
 	IntType
 	// FloatType represents floating-point field values
 	FloatType
+	// TimeType represents time.Time field values
+	TimeType
 )
 
 // Field represents a single field in a document
@@ -90,6 +93,8 @@ func determineFieldType(value interface{}) (FieldType, error) {
 		return IntType, nil
 	case float32, float64:
 		return FloatType, nil
+	case time.Time:
+		return TimeType, nil
 	default:
 		return 0, fmt.Errorf("unsupported field type for value: %v", value)
 	}
