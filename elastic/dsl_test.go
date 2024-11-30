@@ -353,3 +353,179 @@ func TestQueryToJSON(t *testing.T) {
 		t.Errorf("Expected 1 filter clause, got %d", len(boolQuery.Filter))
 	}
 }
+
+func TestDSLCompatibility(t *testing.T) {
+	t.Run("Match Query", func(t *testing.T) {
+		query := map[string]interface{}{
+			"query": map[string]interface{}{
+				"match": map[string]interface{}{
+					"title": "search text",
+				},
+			},
+		}
+		
+		queryBytes, err := json.Marshal(query)
+		if err != nil {
+			t.Fatalf("Failed to marshal query: %v", err)
+		}
+		
+		parsed, err := ParseQuery(queryBytes)
+		if err != nil {
+			t.Fatalf("Failed to parse match query: %v", err)
+		}
+		
+		if parsed.Type() != MatchQuery {
+			t.Errorf("Expected match query type, got %s", parsed.Type())
+		}
+	})
+
+	t.Run("Bool Query", func(t *testing.T) {
+		query := map[string]interface{}{
+			"query": map[string]interface{}{
+				"bool": map[string]interface{}{
+					"must": []interface{}{
+						map[string]interface{}{
+							"match": map[string]interface{}{
+								"title": "search",
+							},
+						},
+					},
+					"must_not": []interface{}{
+						map[string]interface{}{
+							"match": map[string]interface{}{
+								"status": "draft",
+							},
+						},
+					},
+					"should": []interface{}{
+						map[string]interface{}{
+							"match": map[string]interface{}{
+								"category": "tech",
+							},
+						},
+					},
+					"filter": []interface{}{
+						map[string]interface{}{
+							"range": map[string]interface{}{
+								"date": map[string]interface{}{
+									"gte": "2020-01-01",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		
+		queryBytes, err := json.Marshal(query)
+		if err != nil {
+			t.Fatalf("Failed to marshal query: %v", err)
+		}
+		
+		parsed, err := ParseQuery(queryBytes)
+		if err != nil {
+			t.Fatalf("Failed to parse bool query: %v", err)
+		}
+		
+		if parsed.Type() != BoolQuery {
+			t.Errorf("Expected bool query type, got %s", parsed.Type())
+		}
+	})
+
+	t.Run("Range Query", func(t *testing.T) {
+		query := map[string]interface{}{
+			"query": map[string]interface{}{
+				"range": map[string]interface{}{
+					"age": map[string]interface{}{
+						"gte": 20,
+						"lt":  30,
+					},
+				},
+			},
+		}
+		
+		queryBytes, err := json.Marshal(query)
+		if err != nil {
+			t.Fatalf("Failed to marshal query: %v", err)
+		}
+		
+		parsed, err := ParseQuery(queryBytes)
+		if err != nil {
+			t.Fatalf("Failed to parse range query: %v", err)
+		}
+		
+		if parsed.Type() != RangeQuery {
+			t.Errorf("Expected range query type, got %s", parsed.Type())
+		}
+	})
+
+	t.Run("Aggregations", func(t *testing.T) {
+		query := map[string]interface{}{
+			"query": map[string]interface{}{
+				"match_all": map[string]interface{}{},
+			},
+			"aggs": map[string]interface{}{
+				"avg_age": map[string]interface{}{
+					"avg": map[string]interface{}{
+						"field": "age",
+					},
+				},
+			},
+		}
+		
+		queryBytes, err := json.Marshal(query)
+		if err != nil {
+			t.Fatalf("Failed to marshal query: %v", err)
+		}
+		
+		_, err = ParseQuery(queryBytes)
+		if err != nil {
+			t.Fatalf("Failed to parse aggregation query: %v", err)
+		}
+	})
+
+	t.Run("Invalid_Queries", func(t *testing.T) {
+		invalidQueries := []map[string]interface{}{
+			// Missing query field
+			{
+				"match": map[string]interface{}{
+					"field": "value",
+				},
+			},
+			// Invalid query type
+			{
+				"query": map[string]interface{}{
+					"invalid_type": map[string]interface{}{
+						"field": "value",
+					},
+				},
+			},
+			// Invalid bool query structure
+			{
+				"query": map[string]interface{}{
+					"bool": map[string]interface{}{
+						"invalid": []interface{}{
+							map[string]interface{}{
+								"match": map[string]interface{}{
+									"field": "value",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		for i, query := range invalidQueries {
+			queryBytes, err := json.Marshal(query)
+			if err != nil {
+				t.Fatalf("Failed to marshal invalid query %d: %v", i, err)
+			}
+			
+			_, err = ParseQuery(queryBytes)
+			if err == nil {
+				t.Errorf("Expected error for invalid query %d", i)
+			}
+		}
+	})
+}

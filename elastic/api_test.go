@@ -3,12 +3,15 @@ package elastic
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sync"
 	"testing"
 )
 
 // MockAPI implements the API interface for testing
 type MockAPI struct {
 	documents map[string]*Document
+	mu        sync.RWMutex
 }
 
 func NewMockAPI() *MockAPI {
@@ -18,12 +21,25 @@ func NewMockAPI() *MockAPI {
 }
 
 func (m *MockAPI) Index(ctx context.Context, doc *Document) (*Document, error) {
+	if doc.Source == nil || len(doc.Source) == 0 {
+		return nil, fmt.Errorf("document source is empty")
+	}
+	
+	// Check for malformed document
+	if _, hasSource := doc.Source["_source"]; hasSource {
+		return nil, fmt.Errorf("malformed document: contains reserved field '_source'")
+	}
+	
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	key := doc.Index + ":" + doc.ID
 	m.documents[key] = doc
 	return doc, nil
 }
 
 func (m *MockAPI) Get(ctx context.Context, index, id string) (*Document, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	key := index + ":" + id
 	if doc, ok := m.documents[key]; ok {
 		return doc, nil
@@ -36,12 +52,75 @@ func (m *MockAPI) Update(ctx context.Context, doc *Document) (*Document, error) 
 }
 
 func (m *MockAPI) Delete(ctx context.Context, index, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	key := index + ":" + id
 	delete(m.documents, key)
 	return nil
 }
 
 func (m *MockAPI) Search(ctx context.Context, query map[string]interface{}) (*SearchResponse, error) {
+	if query == nil {
+		query = map[string]interface{}{
+			"query": map[string]interface{}{
+				"match_all": map[string]interface{}{},
+			},
+		}
+	}
+	
+	// If no query specified, treat as match_all
+	if _, hasQuery := query["query"]; !hasQuery {
+		query["query"] = map[string]interface{}{
+			"match_all": map[string]interface{}{},
+		}
+	}
+
+	// Validate query structure
+	queryObj, ok := query["query"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid query format: 'query' must be an object")
+	}
+
+	// Check for empty query object
+	if len(queryObj) == 0 {
+		return nil, fmt.Errorf("invalid query format: empty query object")
+	}
+
+	// Must have exactly one query type
+	validTypes := []string{"match", "match_all", "term", "range", "bool"}
+	foundType := ""
+	for _, qType := range validTypes {
+		if queryValue, exists := queryObj[qType]; exists {
+			if foundType != "" {
+				return nil, fmt.Errorf("invalid query format: multiple query types specified")
+			}
+			// Validate the query value is a map
+			if _, ok := queryValue.(map[string]interface{}); !ok {
+				return nil, fmt.Errorf("invalid query format: %s value must be an object", qType)
+			}
+			foundType = qType
+		}
+	}
+	
+	// Check if any invalid query types are present
+	for qType := range queryObj {
+		isValid := false
+		for _, validType := range validTypes {
+			if qType == validType {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			return nil, fmt.Errorf("invalid query format: unsupported query type '%s'", qType)
+		}
+	}
+
+	if foundType == "" {
+		return nil, fmt.Errorf("invalid query format: no valid query type found")
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	// Simple mock implementation that returns all documents
 	hits := make([]Document, 0)
 	for _, doc := range m.documents {
@@ -69,6 +148,8 @@ func (m *MockAPI) MultiSearch(ctx context.Context, queries []map[string]interfac
 }
 
 func (m *MockAPI) ListIndices(ctx context.Context) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	indices := make(map[string]bool)
 	for _, doc := range m.documents {
 		indices[doc.Index] = true
@@ -114,7 +195,11 @@ func TestElasticAPI(t *testing.T) {
 	}
 
 	// Test Search
-	searchResp, err := api.Search(ctx, map[string]interface{}{})
+	searchResp, err := api.Search(ctx, map[string]interface{}{
+		"query": map[string]interface{}{
+			"match_all": map[string]interface{}{},
+		},
+	})
 	if err != nil {
 		t.Fatalf("Search failed: %v", err)
 	}
@@ -173,4 +258,152 @@ func TestTotalRelation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestElasticSearchCompatibility(t *testing.T) {
+	ctx := context.Background()
+	api := NewMockAPI()
+
+	t.Run("ElasticSearch Request Format", func(t *testing.T) {
+		// Test standard ElasticSearch query format
+		query := map[string]interface{}{
+			"query": map[string]interface{}{
+				"match": map[string]interface{}{
+					"field": "value",
+				},
+			},
+			"size": 10,
+			"from": 0,
+		}
+		
+		resp, err := api.Search(ctx, query)
+		if err != nil {
+			t.Fatalf("Search failed: %v", err)
+		}
+		
+		// Validate ElasticSearch response format
+		if resp.Took == 0 {
+			t.Error("Expected non-zero took value")
+		}
+		if resp.Hits.Total.Relation != TotalRelationEq {
+			t.Error("Expected eq relation for total")
+		}
+	})
+
+	t.Run("Concurrent Operations", func(t *testing.T) {
+		const numOps = 100
+		errCh := make(chan error, numOps)
+		doneCh := make(chan bool, numOps)
+
+		for i := 0; i < numOps; i++ {
+			go func(idx int) {
+				doc := &Document{
+					Index:  "concurrent-test",
+					ID:     fmt.Sprintf("doc-%d", idx),
+					Source: map[string]interface{}{"value": idx},
+				}
+				_, err := api.Index(ctx, doc)
+				if err != nil {
+					errCh <- err
+					return
+				}
+				doneCh <- true
+			}(i)
+		}
+
+		// Wait for all operations
+		for i := 0; i < numOps; i++ {
+			select {
+			case err := <-errCh:
+				t.Errorf("Concurrent operation failed: %v", err)
+			case <-doneCh:
+				// Operation successful
+			}
+		}
+	})
+
+	t.Run("Large Payload", func(t *testing.T) {
+		// Create a large document (>1MB)
+		largeData := make([]string, 100000)
+		for i := range largeData {
+			largeData[i] = "test data string that takes up space"
+		}
+
+		doc := &Document{
+			Index:  "large-test",
+			ID:     "large-1",
+			Source: map[string]interface{}{"data": largeData},
+		}
+
+		_, err := api.Index(ctx, doc)
+		if err != nil {
+			t.Fatalf("Large document indexing failed: %v", err)
+		}
+	})
+
+	t.Run("Error Cases", func(t *testing.T) {
+		// Test invalid query format
+		invalidQuery := map[string]interface{}{
+			"query": map[string]interface{}{
+				"invalid_type": map[string]interface{}{
+					"field": "value",
+				},
+			},
+		}
+		_, err := api.Search(ctx, invalidQuery)
+		if err == nil {
+			t.Error("Expected error for invalid query format")
+		}
+
+		// Test multiple query types
+		multipleTypesQuery := map[string]interface{}{
+			"query": map[string]interface{}{
+				"match": map[string]interface{}{
+					"field": "value",
+				},
+				"term": map[string]interface{}{
+					"field": "value",
+				},
+			},
+		}
+		_, err = api.Search(ctx, multipleTypesQuery)
+		if err == nil {
+			t.Error("Expected error for multiple query types")
+		}
+
+		// Test invalid query value type
+		invalidValueQuery := map[string]interface{}{
+			"query": map[string]interface{}{
+				"match": "invalid_value",
+			},
+		}
+		_, err = api.Search(ctx, invalidValueQuery)
+		if err == nil {
+			t.Error("Expected error for invalid query value type")
+		}
+
+		// Test empty document source
+		emptyDoc := &Document{
+			Index:  "test",
+			ID:     "empty",
+			Source: map[string]interface{}{},
+		}
+		_, err = api.Index(ctx, emptyDoc)
+		if err == nil {
+			t.Error("Expected error for empty document source")
+		}
+
+		// Test malformed document
+		malformedDoc := &Document{
+			Index: "test",
+			ID:    "malformed",
+			Source: map[string]interface{}{
+				"_source": nil,
+			},
+		}
+		_, err = api.Index(ctx, malformedDoc)
+		if err == nil {
+			t.Error("Expected error for malformed document")
+		}
+	})
 }

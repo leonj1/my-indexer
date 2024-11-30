@@ -18,6 +18,8 @@ const (
 	RangeQuery QueryType = "range"
 	// Bool query for combining multiple queries
 	BoolQuery QueryType = "bool"
+	// MatchAll query that matches all documents
+	MatchAllQuery QueryType = "match_all"
 )
 
 // Query represents the base query interface
@@ -264,6 +266,19 @@ func (ctx *queryContext) checkAndAddField(clauseType, field string) error {
 	return nil
 }
 
+// MatchAllQueryClause represents a query that matches all documents
+type MatchAllQueryClause struct {
+	BaseQuery
+}
+
+func (q *MatchAllQueryClause) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"query": map[string]interface{}{
+			"match_all": map[string]interface{}{},
+		},
+	})
+}
+
 func ParseQuery(data []byte) (Query, error) {
 	var wrapper struct {
 		Query json.RawMessage `json:"query"`
@@ -284,6 +299,10 @@ func parseQueryClause(data []byte, ctx *queryContext) (Query, error) {
 
 	for queryType, value := range temp {
 		switch queryType {
+		case "match_all":
+			return &MatchAllQueryClause{
+				BaseQuery: BaseQuery{queryType: MatchAllQuery},
+			}, nil
 		case "match":
 			var matchQuery struct {
 				Field string `json:"-"`
@@ -370,6 +389,25 @@ func parseQueryClause(data []byte, ctx *queryContext) (Query, error) {
 				return nil, fmt.Errorf("bool query nesting depth exceeds maximum allowed (%d)", maxBoolNestingDepth)
 			}
 
+			// First unmarshal into a map to check for invalid fields
+			var rawBool map[string]json.RawMessage
+			if err := json.Unmarshal(value, &rawBool); err != nil {
+				return nil, fmt.Errorf("failed to parse bool query: %v", err)
+			}
+
+			// Check for invalid bool query fields
+			validFields := map[string]bool{
+				"must":     true,
+				"should":   true,
+				"must_not": true,
+				"filter":   true,
+			}
+			for field := range rawBool {
+				if !validFields[field] {
+					return nil, fmt.Errorf("invalid bool query field: %s", field)
+				}
+			}
+
 			var boolQuery struct {
 				Must    []json.RawMessage `json:"must,omitempty"`
 				Should  []json.RawMessage `json:"should,omitempty"`
@@ -378,6 +416,12 @@ func parseQueryClause(data []byte, ctx *queryContext) (Query, error) {
 			}
 			if err := json.Unmarshal(value, &boolQuery); err != nil {
 				return nil, fmt.Errorf("failed to parse bool query: %v", err)
+			}
+
+			// Check if at least one valid clause is present
+			if len(boolQuery.Must) == 0 && len(boolQuery.Should) == 0 && 
+			   len(boolQuery.MustNot) == 0 && len(boolQuery.Filter) == 0 {
+				return nil, fmt.Errorf("bool query must contain at least one clause")
 			}
 
 			result := &BoolQueryClause{
