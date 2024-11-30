@@ -2,6 +2,8 @@ package router
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -9,20 +11,43 @@ import (
 	"my-indexer/logger"
 	"my-indexer/index"
 	"my-indexer/analysis"
+	"my-indexer/document"
+	"my-indexer/search"
+	"my-indexer/query"
 )
+
+// IndexDocumentStore adapts Index to implement search.DocumentStore
+type IndexDocumentStore struct {
+	idx *index.Index
+}
+
+// LoadDocument implements search.DocumentStore
+func (s *IndexDocumentStore) LoadDocument(docID int) (*document.Document, error) {
+	return s.idx.GetDocument(docID)
+}
+
+// LoadAllDocuments implements search.DocumentStore
+func (s *IndexDocumentStore) LoadAllDocuments() ([]*document.Document, error) {
+	return s.idx.GetAllDocuments()
+}
 
 // Router handles HTTP requests for the indexer
 type Router struct {
-	mux   *http.ServeMux
-	index *index.Index
+	mux    *http.ServeMux
+	index  *index.Index
+	search *search.Search
 }
 
 // NewRouter creates a new Router instance
 func NewRouter() *Router {
 	analyzer := analysis.NewStandardAnalyzer()
+	idx := index.NewIndex(analyzer)
+	store := &IndexDocumentStore{idx: idx}
+	
 	router := &Router{
-		mux:   http.NewServeMux(),
-		index: index.NewIndex(analyzer),
+		mux:    http.NewServeMux(),
+		index:  idx,
+		search: search.NewSearch(idx, store),
 	}
 
 	// Initialize the logger
@@ -175,50 +200,115 @@ func (r *Router) handleDocument(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
-	logger.Info("Handling search request: %s %s", req.Method, req.URL.Path)
-
-	// Check method first
+	// Only allow GET and POST methods
 	if req.Method != http.MethodGet && req.Method != http.MethodPost {
-		r.errorResponse(w, http.StatusMethodNotAllowed, "only GET and POST methods are allowed")
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract index name from path
-	parts := strings.Split(req.URL.Path, "/")
-	if len(parts) < 3 {
-		r.errorResponse(w, http.StatusBadRequest, "invalid index name")
+	var queryMapObj map[string]interface{}
+	var err error
+
+	if req.Method == http.MethodGet {
+		// For GET requests without a query parameter, use match_all query
+		queryStr := req.URL.Query().Get("q")
+		if queryStr == "" {
+			queryMapObj = map[string]interface{}{
+				"match_all": map[string]interface{}{},
+			}
+		} else {
+			// Create a match query for the q parameter
+			queryMapObj = map[string]interface{}{
+				"match": map[string]interface{}{
+					"_all": queryStr,
+				},
+			}
+		}
+	} else {
+		// Parse query from request body for POST
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+		defer req.Body.Close()
+
+		var searchRequest struct {
+			Query map[string]interface{} `json:"query"`
+		}
+
+		if err := json.Unmarshal(body, &searchRequest); err != nil {
+			http.Error(w, "Invalid JSON in request body", http.StatusBadRequest)
+			return
+		}
+
+		if searchRequest.Query == nil {
+			http.Error(w, "Query object is required", http.StatusBadRequest)
+			return
+		}
+
+		queryMapObj = searchRequest.Query
+	}
+
+	// Initialize query mapper
+	queryMapper := query.NewQueryMapper()
+
+	// Prepare query wrapper
+	var queryWrapper map[string]interface{}
+
+	// If the query is a direct match/term/range/bool query
+	if queryType, ok := getQueryType(queryMapObj); ok {
+		switch queryType {
+		case "match", "term", "match_phrase", "match_all", "range", "bool":
+			// For match queries, ensure proper structure
+			if queryType == "match" {
+				if fieldMap, ok := queryMapObj[queryType].(map[string]interface{}); ok {
+					for field, fieldValue := range fieldMap {
+						// If the field value is a string, wrap it in a query object
+						if _, ok := fieldValue.(string); ok {
+							fieldMap[field] = map[string]interface{}{
+								"query": fieldValue,
+							}
+						}
+					}
+				}
+			}
+			queryWrapper = queryMapObj
+			goto processQuery
+		}
+	}
+
+	// If no valid query type found, treat the entire query object as a match query
+	queryWrapper = map[string]interface{}{"match": queryMapObj}
+
+processQuery:
+	// Pass the query object to the mapper
+	queryObj, err := queryMapper.MapQuery(queryWrapper)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to map query: %v", err), http.StatusBadRequest)
 		return
 	}
-	indexName := parts[1]
 
-	// Validate the request
-	if err := validateSearchRequest(req); err != nil {
-		r.errorResponse(w, http.StatusBadRequest, err.Error())
+	// Execute the query
+	results, err := r.search.SearchWithQuery(queryObj)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to execute search: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// TODO: Implement search
-	logger.Info("Processing search request for index: %s", indexName)
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"took":      0,
-		"timed_out": false,
-		"hits": map[string]interface{}{
-			"total": map[string]interface{}{
-				"value":    0,
-				"relation": "eq",
-			},
-			"max_score": nil,
-			"hits":      []interface{}{},
-		},
-	})
+	// Return results
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
+
+func getQueryType(query map[string]interface{}) (string, bool) {
+	for queryType := range query {
+		return queryType, true
+	}
+	return "", false
 }
 
 func (r *Router) handleMultiSearch(w http.ResponseWriter, req *http.Request) {
-	if err := validateSearchRequest(req); err != nil {
-		r.errorResponse(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	// TODO: Implement multi-search
 	http.Error(w, "Not implemented", http.StatusNotImplemented)
 }
@@ -233,10 +323,6 @@ func (r *Router) handleListIndices(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleScroll(w http.ResponseWriter, req *http.Request) {
-	if err := validateSearchRequest(req); err != nil {
-		r.errorResponse(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	// TODO: Implement scroll API
 	http.Error(w, "Not implemented", http.StatusNotImplemented)
 }

@@ -702,3 +702,15 @@ func (idx *Index) IndexDocument(indexName string, docID string, doc map[string]i
     _, err := idx.AddDocument(internalDoc)
     return err
 }
+
+// GetAllDocuments returns all documents in the index
+func (idx *Index) GetAllDocuments() ([]*document.Document, error) {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	docs := make([]*document.Document, 0, len(idx.docIDMap))
+	for _, doc := range idx.docIDMap {
+		docs = append(docs, doc)
+	}
+	return docs, nil
+}

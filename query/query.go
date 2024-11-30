@@ -287,6 +287,7 @@ func NewMatchQuery(field, text string) *MatchQueryImpl {
 
 func (q *MatchQueryImpl) Type() QueryType { return MatchQuery }
 func (q *MatchQueryImpl) Field() string   { return q.field }
+func (q *MatchQueryImpl) Text() string    { return q.text }
 func (q *MatchQueryImpl) Match(value interface{}) bool {
 	if str, ok := value.(string); ok {
 		// For now, we'll do a simple case-insensitive contains check
@@ -376,11 +377,18 @@ func (m *QueryMapper) mapTermQuery(body interface{}) (Query, error) {
 	}
 
 	for field, value := range termBody {
-		strValue, ok := value.(string)
-		if !ok {
-			return nil, fmt.Errorf("term query value must be a string")
+		switch v := value.(type) {
+		case string:
+			return NewTermQuery(field, v), nil
+		case map[string]interface{}:
+			if termValue, ok := v["value"].(string); ok {
+				return NewTermQuery(field, termValue), nil
+			}
+			if termValue, ok := v["term"].(string); ok {
+				return NewTermQuery(field, termValue), nil
+			}
 		}
-		return NewTermQuery(field, strValue), nil
+		return nil, fmt.Errorf("term query value must be a string or {value: string}")
 	}
 
 	return nil, fmt.Errorf("invalid term query structure")
@@ -431,32 +439,32 @@ func (m *QueryMapper) mapBoolQuery(body interface{}) (Query, error) {
 
 	query := NewBooleanQuery()
 
-	if must, ok := boolBody["must"].([]interface{}); ok {
-		for _, q := range must {
-			if subQuery, err := m.MapQuery(q.(map[string]interface{})); err == nil {
+	for clause, queries := range boolBody {
+		queryList, ok := queries.([]interface{})
+		if !ok {
+			return nil, fmt.Errorf("invalid bool clause structure for %s", clause)
+		}
+
+		for _, q := range queryList {
+			queryMap, ok := q.(map[string]interface{})
+			if !ok {
+				return nil, fmt.Errorf("invalid query in bool clause")
+			}
+
+			subQuery, err := m.MapQuery(queryMap)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse query in bool clause: %v", err)
+			}
+
+			switch clause {
+			case "must":
 				query.AddMust(subQuery)
-			} else {
-				return nil, fmt.Errorf("invalid must query: %v", err)
-			}
-		}
-	}
-
-	if should, ok := boolBody["should"].([]interface{}); ok {
-		for _, q := range should {
-			if subQuery, err := m.MapQuery(q.(map[string]interface{})); err == nil {
+			case "should":
 				query.AddShould(subQuery)
-			} else {
-				return nil, fmt.Errorf("invalid should query: %v", err)
-			}
-		}
-	}
-
-	if mustNot, ok := boolBody["must_not"].([]interface{}); ok {
-		for _, q := range mustNot {
-			if subQuery, err := m.MapQuery(q.(map[string]interface{})); err == nil {
+			case "must_not":
 				query.AddMustNot(subQuery)
-			} else {
-				return nil, fmt.Errorf("invalid must_not query: %v", err)
+			default:
+				return nil, fmt.Errorf("unsupported bool clause: %s", clause)
 			}
 		}
 	}
@@ -482,8 +490,11 @@ func (m *QueryMapper) mapMatchQuery(body interface{}) (Query, error) {
 			if query, ok := v["query"].(string); ok {
 				return NewMatchQuery(field, query), nil
 			}
+			if query, ok := v["value"].(string); ok {
+				return NewMatchQuery(field, query), nil
+			}
 		}
-		return nil, fmt.Errorf("invalid match query value")
+		return nil, fmt.Errorf("match query value must be a string or {query: string}")
 	}
 
 	return nil, fmt.Errorf("invalid match query structure")

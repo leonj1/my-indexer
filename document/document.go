@@ -31,6 +31,7 @@ type Field struct {
 // Document represents a searchable document with multiple fields
 type Document struct {
 	mu     sync.RWMutex
+	ID     int
 	fields map[string]Field
 }
 
