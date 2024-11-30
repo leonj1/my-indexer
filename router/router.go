@@ -3,6 +3,7 @@ package router
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"my-indexer/analysis"
 	"my-indexer/document"
 	"my-indexer/search"
+	"my-indexer/query"
 )
 
 // IndexDocumentStore adapts Index to implement search.DocumentStore
@@ -22,6 +24,11 @@ type IndexDocumentStore struct {
 // LoadDocument implements search.DocumentStore
 func (s *IndexDocumentStore) LoadDocument(docID int) (*document.Document, error) {
 	return s.idx.GetDocument(docID)
+}
+
+// LoadAllDocuments implements search.DocumentStore
+func (s *IndexDocumentStore) LoadAllDocuments() ([]*document.Document, error) {
+	return s.idx.GetAllDocuments()
 }
 
 // Router handles HTTP requests for the indexer
@@ -193,104 +200,110 @@ func (r *Router) handleDocument(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
-	logger.Info("Handling search request: %s %s", req.Method, req.URL.Path)
-
-	// Validate request method
+	// Only allow GET and POST methods
 	if req.Method != http.MethodGet && req.Method != http.MethodPost {
-		r.errorResponse(w, http.StatusMethodNotAllowed, "only GET and POST methods are allowed")
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Validate the request
-	if err := validateSearchRequest(req); err != nil {
-		r.errorResponse(w, http.StatusBadRequest, err.Error())
-		return
-	}
+	var queryMapObj map[string]interface{}
+	var err error
 
-	// Extract index name from path
-	parts := strings.Split(req.URL.Path, "/")
-	if len(parts) < 3 {
-		r.errorResponse(w, http.StatusBadRequest, "invalid index name")
-		return
-	}
-	indexName := parts[1]
-
-	// Start timing the search operation
-	startTime := time.Now()
-
-	// Default query for GET requests
-	var terms []string
 	if req.Method == http.MethodGet {
-		terms = []string{"*:*"} // Match all query
+		// Parse query from URL parameters
+		queryStr := req.URL.Query().Get("q")
+		if queryStr == "" {
+			http.Error(w, "Query parameter 'q' is required", http.StatusBadRequest)
+			return
+		}
+		// Create a match query for the q parameter
+		queryMapObj = map[string]interface{}{
+			"match": map[string]interface{}{
+				"_all": queryStr,
+			},
+		}
 	} else {
-		// Validate Content-Type for POST requests
-		contentType := req.Header.Get("Content-Type")
-		if contentType != "application/json" {
-			r.errorResponse(w, http.StatusBadRequest, "Content-Type must be application/json")
+		// Parse query from request body for POST
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			http.Error(w, "Failed to read request body", http.StatusBadRequest)
+			return
+		}
+		defer req.Body.Close()
+
+		var searchRequest struct {
+			Query map[string]interface{} `json:"query"`
+		}
+
+		if err := json.Unmarshal(body, &searchRequest); err != nil {
+			http.Error(w, "Invalid JSON in request body", http.StatusBadRequest)
 			return
 		}
 
-		// Parse request body
-		var requestBody map[string]interface{}
-		if err := json.NewDecoder(req.Body).Decode(&requestBody); err != nil {
-			// If JSON parsing fails, default to match_all query
-			terms = append(terms, "*:*")
-		} else {
-			// For POST requests, parse the query
-			if queryRaw, ok := requestBody["query"]; ok {
-				// Handle match_all query
-				if queryMap, ok := queryRaw.(map[string]interface{}); ok {
-					if _, ok := queryMap["match_all"]; ok {
-						terms = append(terms, "*:*")
-					} else {
-						// Convert other query types to terms
-						for field, value := range queryMap {
-							if valueMap, ok := value.(map[string]interface{}); ok {
-								for k, v := range valueMap {
-									terms = append(terms, fmt.Sprintf("%s:%v", k, v))
-								}
-							} else {
-								terms = append(terms, fmt.Sprintf("%s:%v", field, value))
+		if searchRequest.Query == nil {
+			http.Error(w, "Query object is required", http.StatusBadRequest)
+			return
+		}
+
+		queryMapObj = searchRequest.Query
+	}
+
+	// Initialize query mapper
+	queryMapper := query.NewQueryMapper()
+
+	// Prepare query wrapper
+	var queryWrapper map[string]interface{}
+
+	// If the query is a direct match/term/range/bool query
+	if queryType, ok := getQueryType(queryMapObj); ok {
+		switch queryType {
+		case "match", "term", "match_phrase", "match_all", "range", "bool":
+			// For match queries, ensure proper structure
+			if queryType == "match" {
+				if fieldMap, ok := queryMapObj[queryType].(map[string]interface{}); ok {
+					for field, fieldValue := range fieldMap {
+						// If the field value is a string, wrap it in a query object
+						if _, ok := fieldValue.(string); ok {
+							fieldMap[field] = map[string]interface{}{
+								"query": fieldValue,
 							}
 						}
 					}
 				}
 			}
-
-			// If no terms were added, default to match_all
-			if len(terms) == 0 {
-				terms = append(terms, "*:*")
-			}
+			queryWrapper = queryMapObj
+			goto processQuery
 		}
 	}
 
-	// Execute search
-	results, err := r.search.Search(terms, search.OR) // Use OR for better recall
+	// If no valid query type found, treat the entire query object as a match query
+	queryWrapper = map[string]interface{}{"match": queryMapObj}
+
+processQuery:
+	// Pass the query object to the mapper
+	queryObj, err := queryMapper.MapQuery(queryWrapper)
 	if err != nil {
-		r.errorResponse(w, http.StatusInternalServerError, fmt.Sprintf("failed to execute search: %v", err))
+		http.Error(w, fmt.Sprintf("Failed to map query: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	// Format results
-	took := time.Since(startTime)
-	esResponse := search.FormatESResponse(results, took, indexName)
+	// Execute the query
+	results, err := r.search.SearchWithQuery(queryObj)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to execute search: %v", err), http.StatusInternalServerError)
+		return
+	}
 
-	// Send response
+	// Return results
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(esResponse); err != nil {
-		logger.Error("Failed to encode response: %v", err)
-		r.errorResponse(w, http.StatusInternalServerError, "failed to encode response")
-		return
+	json.NewEncoder(w).Encode(results)
+}
+
+func getQueryType(query map[string]interface{}) (string, bool) {
+	for queryType := range query {
+		return queryType, true
 	}
-}
-
-type validationError struct {
-	status  int
-	message string
-}
-
-func (e *validationError) Error() string {
-	return e.message
+	return "", false
 }
 
 func (r *Router) handleMultiSearch(w http.ResponseWriter, req *http.Request) {

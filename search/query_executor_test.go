@@ -43,6 +43,14 @@ func (s *MockDocumentStore) LoadDocument(docID int) (*document.Document, error) 
 	return s.docs[docID], nil
 }
 
+func (s *MockDocumentStore) LoadAllDocuments() ([]*document.Document, error) {
+	docs := make([]*document.Document, 0, len(s.docs))
+	for _, doc := range s.docs {
+		docs = append(docs, doc)
+	}
+	return docs, nil
+}
+
 func TestQueryExecutor(t *testing.T) {
 	// Setup test environment
 	analyzer := &mockAnalyzer{}

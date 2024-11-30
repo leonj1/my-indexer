@@ -1,7 +1,6 @@
 package search
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -54,13 +53,13 @@ func FormatESResponse(results *Results, took time.Duration, index string) *ESRes
 
 		// Convert document fields to map
 		source := make(map[string]interface{})
-		for name, field := range hit.Doc.GetFields() {
+		for name, field := range hit.Source.GetFields() {
 			source[name] = field.Value
 		}
 
 		hits = append(hits, ESHit{
 			Index:  index,
-			ID:     fmt.Sprintf("%d", hit.DocID),
+			ID:     hit.ID,
 			Score:  hit.Score,
 			Source: source,
 		})

@@ -89,9 +89,9 @@ func (e *QueryExecutor) executeTermQuery(q query.Query) (*Results, error) {
 		score := e.calculateScore(docID, []string{term})
 
 		results.hits = append(results.hits, &Result{
-			DocID: docID,
-			Score: score,
-			Doc:   doc,
+			ID:     fmt.Sprintf("%d", docID),
+			Score:  score,
+			Source: doc,
 		})
 	}
 
@@ -180,9 +180,9 @@ func (e *QueryExecutor) executeRangeQuery(q query.Query) (*Results, error) {
 		}
 
 		results.hits = append(results.hits, &Result{
-			DocID: docID,
-			Score: 1.0, // Default score for range queries
-			Doc:   doc,
+			ID:     fmt.Sprintf("%d", docID),
+			Score:  1.0, // Default score for range queries
+			Source: doc,
 		})
 	}
 
@@ -227,9 +227,72 @@ func (e *QueryExecutor) executeBooleanQuery(q query.Query) (*Results, error) {
 
 // executeMatchQuery executes a match query
 func (e *QueryExecutor) executeMatchQuery(q query.Query) (*Results, error) {
-	// For now, treat match queries like term queries
-	// TODO: Implement proper text analysis for match queries
-	return e.executeTermQuery(q)
+	mq, ok := q.(*query.MatchQueryImpl)
+	if !ok {
+		return nil, fmt.Errorf("invalid match query type")
+	}
+
+	// Get the analyzer from the search instance
+	tokens := e.search.idx.Analyzer().Analyze(mq.Text())
+	if len(tokens) == 0 {
+		return &Results{hits: make([]*Result, 0)}, nil
+	}
+
+	// Process each token
+	results := &Results{
+		hits: make([]*Result, 0),
+	}
+
+	// Track seen documents to avoid duplicates
+	seenDocs := make(map[int]bool)
+
+	for _, token := range tokens {
+		// Get posting list for the term
+		postings := e.search.idx.GetPostings(token.Text)
+
+		// Process each document
+		for docID, posting := range postings {
+			// Skip if we've already processed this document
+			if seenDocs[docID] {
+				continue
+			}
+
+			// Check if the term appears in the specified field
+			fieldFound := false
+			for _, field := range posting.Fields {
+				if field == mq.Field() {
+					fieldFound = true
+					break
+				}
+			}
+			if !fieldFound {
+				continue
+			}
+
+			// Load document
+			doc, err := e.search.store.LoadDocument(docID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load document %d: %w", docID, err)
+			}
+
+			// Calculate score using TF-IDF
+			score := e.calculateScore(docID, []string{token.Text})
+
+			results.hits = append(results.hits, &Result{
+				ID:     fmt.Sprintf("%d", docID),
+				Score:  score,
+				Source: doc,
+			})
+
+			// Mark document as seen
+			seenDocs[docID] = true
+		}
+	}
+
+	// Sort results by score
+	sort.Sort(results)
+
+	return results, nil
 }
 
 // executeMustClauses executes must clauses of a boolean query
@@ -253,13 +316,13 @@ func (e *QueryExecutor) executeMustClauses(queries []query.Query) (*Results, err
 
 		// Keep only documents that appear in both result sets
 		filteredHits := make([]*Result, 0)
-		docMap := make(map[int]*Result)
+		docMap := make(map[string]*Result)
 		for _, hit := range nextResults.hits {
-			docMap[hit.DocID] = hit
+			docMap[hit.ID] = hit
 		}
 
 		for _, hit := range results.hits {
-			if _, exists := docMap[hit.DocID]; exists {
+			if _, exists := docMap[hit.ID]; exists {
 				filteredHits = append(filteredHits, hit)
 			}
 		}
@@ -277,7 +340,7 @@ func (e *QueryExecutor) executeShouldClauses(queries []query.Query) (*Results, e
 	}
 
 	// Create a map to track unique documents and their highest scores
-	docMap := make(map[int]*Result)
+	docMap := make(map[string]*Result)
 
 	// Execute each query and merge results
 	for _, q := range queries {
@@ -287,13 +350,13 @@ func (e *QueryExecutor) executeShouldClauses(queries []query.Query) (*Results, e
 		}
 
 		for _, hit := range results.hits {
-			if existing, exists := docMap[hit.DocID]; exists {
+			if existing, exists := docMap[hit.ID]; exists {
 				// Keep the higher score
 				if hit.Score > existing.Score {
-					docMap[hit.DocID] = hit
+					docMap[hit.ID] = hit
 				}
 			} else {
-				docMap[hit.DocID] = hit
+				docMap[hit.ID] = hit
 			}
 		}
 	}
@@ -327,16 +390,16 @@ func (e *QueryExecutor) combineResults(must, should *Results) *Results {
 	}
 
 	// Combine scores from must and should clauses
-	docMap := make(map[int]*Result)
+	docMap := make(map[string]*Result)
 	
 	// Add all must results
 	for _, hit := range must.hits {
-		docMap[hit.DocID] = hit
+		docMap[hit.ID] = hit
 	}
 
 	// Add scores from should results
 	for _, hit := range should.hits {
-		if existing, exists := docMap[hit.DocID]; exists {
+		if existing, exists := docMap[hit.ID]; exists {
 			// Combine scores
 			existing.Score += hit.Score
 		}

@@ -7,6 +7,7 @@ import (
 	"my-indexer/analysis"
 	"my-indexer/document"
 	"my-indexer/index"
+	"fmt"
 )
 
 // mockDocumentStore implements DocumentStore for testing
@@ -15,10 +16,18 @@ type mockDocumentStore struct {
 }
 
 func (m *mockDocumentStore) LoadDocument(docID int) (*document.Document, error) {
-	if doc, exists := m.docs[docID]; exists {
+	if doc, ok := m.docs[docID]; ok {
 		return doc, nil
 	}
-	return document.NewDocument(), nil
+	return nil, fmt.Errorf("document not found: %d", docID)
+}
+
+func (m *mockDocumentStore) LoadAllDocuments() ([]*document.Document, error) {
+	docs := make([]*document.Document, 0, len(m.docs))
+	for _, doc := range m.docs {
+		docs = append(docs, doc)
+	}
+	return docs, nil
 }
 
 func newMockStore() *mockDocumentStore {

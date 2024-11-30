@@ -8,6 +8,7 @@ import (
 
 	"my-indexer/document"
 	"my-indexer/index"
+	"my-indexer/query"
 )
 
 // Operator represents a boolean operator
@@ -22,9 +23,13 @@ const (
 
 // Result represents a search result with its score
 type Result struct {
-	DocID int
-	Score float64
-	Doc   *document.Document
+	Index  string             `json:"_index"`
+	Type   string             `json:"_type"`
+	ID     string             `json:"_id"`
+	DocID  int               `json:"doc_id"`
+	Score  float64            `json:"_score"`
+	Source *document.Document `json:"_source"`
+	Doc    *document.Document `json:"doc"` // Alias for Source for backward compatibility
 }
 
 // Results represents a sorted list of search results
@@ -58,9 +63,10 @@ type Search struct {
 	maxDoc int
 }
 
-// DocumentStore interface for loading documents
+// DocumentStore is an interface for loading documents
 type DocumentStore interface {
 	LoadDocument(docID int) (*document.Document, error)
+	LoadAllDocuments() ([]*document.Document, error)
 }
 
 // NewSearch creates a new search instance
@@ -149,10 +155,55 @@ func (s *Search) Search(terms []string, op Operator) (*Results, error) {
 		}
 
 		results.hits = append(results.hits, &Result{
-			DocID: docID,
-			Score: score,
-			Doc:   doc,
+			Index:  "",
+			Type:   "",
+			ID:     fmt.Sprintf("%d", docID),
+			DocID:  docID,
+			Score:  score,
+			Source: doc,
+			Doc:    doc,
 		})
+	}
+
+	// Sort results by score
+	sort.Sort(results)
+
+	return results, nil
+}
+
+// SearchWithQuery performs a search using a Query object
+func (s *Search) SearchWithQuery(query query.Query) (*Results, error) {
+	results := &Results{
+		hits: make([]*Result, 0),
+	}
+
+	// Get all documents from the store
+	docs, err := s.store.LoadAllDocuments()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get documents: %v", err)
+	}
+
+	// Filter documents based on the query
+	for _, doc := range docs {
+		// For each field in the document
+		for field, value := range doc.GetFields() {
+			// Check if the query matches this field
+			if query.Field() == "" || query.Field() == field {
+				if query.Match(value) {
+					result := &Result{
+						Index:  "",
+						Type:   "",
+						ID:     fmt.Sprintf("%d", doc.ID),
+						DocID:  doc.ID,
+						Score:  1.0,
+						Source: doc,
+						Doc:    doc,
+					}
+					results.hits = append(results.hits, result)
+					break // Once we find a match in any field, we can stop checking other fields
+				}
+			}
+		}
 	}
 
 	// Sort results by score
