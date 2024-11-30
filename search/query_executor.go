@@ -3,9 +3,8 @@ package search
 import (
 	"fmt"
 	"math"
-	"sort"
-
 	"my-indexer/query"
+	"sort"
 )
 
 // QueryExecutor executes internal queries and returns search results
@@ -135,9 +134,28 @@ func (e *QueryExecutor) executeRangeQuery(q query.Query) (*Results, error) {
 		switch v := field.Value.(type) {
 		case int:
 			fieldValue = float64(v)
+		case int32:
+			fieldValue = float64(v)
+		case int64:
+			if v > 9223372036854775807 || v < -9223372036854775808 {
+				return nil, fmt.Errorf("int64 value %d exceeds float64 range", v)
+			}
+			fieldValue = float64(v)
+		case float32:
+			fieldValue = float64(v)
 		case float64:
 			fieldValue = v
+		case uint:
+			fieldValue = float64(v)
+		case uint32:
+			fieldValue = float64(v)
+		case uint64:
+			if v > 18446744073709551615 {
+				return nil, fmt.Errorf("uint64 value %d exceeds float64 range", v)
+			}
+			fieldValue = float64(v)
 		default:
+			// Skip non-numeric fields
 			continue
 		}
 
@@ -147,6 +165,8 @@ func (e *QueryExecutor) executeRangeQuery(q query.Query) (*Results, error) {
 				if fieldValue <= gt {
 					continue
 				}
+			} else {
+				return nil, fmt.Errorf("gt value is not a float64")
 			}
 		}
 		if rq.Lt() != nil {
@@ -154,6 +174,8 @@ func (e *QueryExecutor) executeRangeQuery(q query.Query) (*Results, error) {
 				if fieldValue >= lt {
 					continue
 				}
+			} else {
+				return nil, fmt.Errorf("lt value is not a float64")
 			}
 		}
 
