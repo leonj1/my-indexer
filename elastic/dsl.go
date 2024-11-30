@@ -20,6 +20,8 @@ const (
 	BoolQuery QueryType = "bool"
 	// MatchAll query that matches all documents
 	MatchAllQuery QueryType = "match_all"
+	// Prefix query for prefix matches
+	PrefixQuery QueryType = "prefix"
 )
 
 // Query represents the base query interface
@@ -269,6 +271,23 @@ func (q *MatchAllQueryClause) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// PrefixQueryClause represents a prefix query
+type PrefixQueryClause struct {
+	BaseQuery
+	Field string
+	Value interface{}
+}
+
+func (q *PrefixQueryClause) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"prefix": map[string]interface{}{
+			q.Field: map[string]interface{}{
+				"value": q.Value,
+			},
+		},
+	})
+}
+
 func ParseQuery(data []byte) (Query, error) {
 	var wrapper struct {
 		Query json.RawMessage `json:"query"`
@@ -322,6 +341,8 @@ func parseQueryClause(data []byte, ctx *queryContext) (Query, error) {
 			return parseBoolQuery(raw, ctx)
 		case "match_all":
 			return parseMatchAllQuery(valueBytes, ctx)
+		case "prefix":
+			return parsePrefixQuery(valueBytes, ctx)
 		default:
 			return nil, fmt.Errorf("unsupported query type: %s", queryType)
 		}
@@ -545,6 +566,45 @@ func parseBoolQuery(data map[string]interface{}, ctx *queryContext) (Query, erro
 	}
 
 	return boolQuery, nil
+}
+
+func parsePrefixQuery(data []byte, ctx *queryContext) (Query, error) {
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	if len(raw) != 1 {
+		return nil, fmt.Errorf("prefix query must have exactly one field")
+	}
+
+	var field string
+	var value interface{}
+
+	for f, v := range raw {
+		field = f
+		switch val := v.(type) {
+		case map[string]interface{}:
+			if v, ok := val["value"]; ok {
+				value = v
+			} else {
+				// If no value field is present, use the value directly
+				value = val
+			}
+		default:
+			value = val
+		}
+	}
+
+	if err := ctx.checkAndAddField("prefix", field); err != nil {
+		return nil, err
+	}
+
+	return &PrefixQueryClause{
+		BaseQuery: BaseQuery{queryType: PrefixQuery},
+		Field:     field,
+		Value:     value,
+	}, nil
 }
 
 func parseMatchAllQuery(data []byte, ctx *queryContext) (Query, error) {
